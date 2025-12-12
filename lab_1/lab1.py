@@ -24,11 +24,29 @@ from os import getenv  # Environment variables
 from locale import setlocale, currency, LC_ALL  # Currency formatter
 import pandas as pd  # Initialize Products
 
+# Application constants
+PRODUCTS_PER_PAGE = 9
+ADMIN_USER_ID = 1
+DELIVERY_COST_PER_CHARACTER = 100
+DEFAULT_PAGINATION_PAGE = 1
+DEFAULT_PAYMENT_STATUS = 'Unpaid'
+DEFAULT_DELIVERY_STATUS = 'Unsent'
+COMPLETED_PAYMENT_STATUS = 'Paid'
+COMPLETED_DELIVERY_STATUS = 'Delivered'
+DATE_FORMAT = '%Y-%m-%d'
+DISPLAY_DATE_FORMAT = '%d/%m/%Y'
+PASSWORD_HASH_METHOD = 'pbkdf2:sha256'
+PASSWORD_SALT_LENGTH = 13
+SQLITE_DATABASE_URI = 'sqlite:///online-shop.db'
+POSTGRES_REPLACEMENT = 'postgres'
+POSTGRESQL_REPLACEMENT = 'postgresql'
+LOCALE_SETTING = 'id_ID.utf8'
+
 # Load Environment Variables
 load_dotenv()
 
 # Configure Locale
-setlocale(LC_ALL, 'id_ID.utf8')
+setlocale(LC_ALL, LOCALE_SETTING)
 
 # Create App
 app = Flask(__name__)
@@ -40,9 +58,11 @@ login_manager.init_app(app)
 
 # Config Database URL
 if getenv('DATABASE_URL') is None:
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///online-shop.db'
+    app.config['SQLALCHEMY_DATABASE_URI'] = SQLITE_DATABASE_URI
 else:
-    database_url = getenv('DATABASE_URL').replace("postgres", "postgresql")
+    database_url = getenv('DATABASE_URL').replace(
+        POSTGRES_REPLACEMENT, POSTGRESQL_REPLACEMENT
+    )
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -73,7 +93,7 @@ def admin_only(func):
 
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if current_user.is_authenticated and current_user.id == 1:
+        if current_user.is_authenticated and current_user.id == ADMIN_USER_ID:
             return func(*args, **kwargs)
         from flask import abort
         return abort(403)
@@ -86,7 +106,7 @@ def member_only(func):
 
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if current_user.is_authenticated and current_user.id != 1:
+        if current_user.is_authenticated and current_user.id != ADMIN_USER_ID:
             return func(*args, **kwargs)
         from flask import abort
         return abort(403)
@@ -119,7 +139,7 @@ def format_date(date):
     Returns:
         str: Formatted date string.
     """
-    return date.strftime('%d/%m/%Y')
+    return date.strftime(DISPLAY_DATE_FORMAT)
 
 
 @app.template_filter('refactor_categories')
@@ -255,7 +275,7 @@ def get_total_payment(transaction_info):
 
 @app.route('/')
 @app.route('/<int:page>')
-def home(page=1):
+def home(page=DEFAULT_PAGINATION_PAGE):
     """Render home page with paginated products.
 
     Args:
@@ -264,13 +284,13 @@ def home(page=1):
     Returns:
         str: Rendered HTML template.
     """
-    products = Product.query.paginate(page, 9)
+    products = Product.query.paginate(page, PRODUCTS_PER_PAGE)
     return render_template('index.html', products=products)
 
 
 @app.route('/category/<int:id>')
 @app.route('/category/<int:id>/<int:page>')
-def get_by_category(id: int, page=1):
+def get_by_category(id: int, page=DEFAULT_PAGINATION_PAGE):
     """Render products filtered by category with pagination.
 
     Args:
@@ -282,13 +302,13 @@ def get_by_category(id: int, page=1):
     """
     products = Product.query.join(ProductCategory).filter_by(
         category_id=id
-    ).paginate(page, 9)
+    ).paginate(page, PRODUCTS_PER_PAGE)
     return render_template('index.html', products=products)
 
 
 @app.route('/search')
 @app.route('/search/<int:page>')
-def search_product(page=1):
+def search_product(page=DEFAULT_PAGINATION_PAGE):
     """Search products by name with pagination.
 
     Args:
@@ -300,7 +320,7 @@ def search_product(page=1):
     query = request.args.get('search')
     products = Product.query.filter(
         Product.name.like(f'%{query}%')
-    ).paginate(page, 9)
+    ).paginate(page, PRODUCTS_PER_PAGE)
     return render_template('index.html', products=products)
 
 
@@ -324,10 +344,10 @@ def register():
                 email=request.form.get('email'),
                 password=generate_password_hash(
                     request.form.get('password'),
-                    method='pbkdf2:sha256',
-                    salt_length=13,
+                    method=PASSWORD_HASH_METHOD,
+                    salt_length=PASSWORD_SALT_LENGTH,
                 ),
-                dob=datetime.strptime(request.form.get('dob'), '%Y-%m-%d'),
+                dob=datetime.strptime(request.form.get('dob'), DATE_FORMAT),
             )
             with app.app_context():
                 db.session.add(new_user)
@@ -624,10 +644,10 @@ def checkout(user_id):
                 user=current_user,
                 date=datetime.now().date(),
                 payment_method=request.form.get('payment_method'),
-                payment_status='Unpaid',
+                payment_status=DEFAULT_PAYMENT_STATUS,
                 address=request.form.get('address'),
-                delivery_cost=len(request.form.get('address')) * 100,
-                delivery_status='Unsent',
+                delivery_cost=len(request.form.get('address')) * DELIVERY_COST_PER_CHARACTER,
+                delivery_status=DEFAULT_DELIVERY_STATUS,
             )
             db.session.add(new_transaction)
             db.session.commit()
@@ -719,8 +739,8 @@ def product_delivered(user_id, transaction_id):
         return abort(403)
     transaction = Transaction.query.filter_by(id=transaction_id).first()
     with app.app_context():
-        transaction.delivery_status = 'Delivered'
-        transaction.payment_status = 'Paid'
+        transaction.delivery_status = COMPLETED_DELIVERY_STATUS
+        transaction.payment_status = COMPLETED_PAYMENT_STATUS
         db.session.commit()
     return redirect(url_for(
         'get_transaction_history',
