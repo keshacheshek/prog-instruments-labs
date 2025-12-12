@@ -12,18 +12,30 @@
 开发时间: 2019-6-28
 """
 
-import PIL as pil
-from PIL import ImageTk
-from tkinter import *
-from tkinter.messagebox import *
+# ==================== ИМПОРТЫ ====================
+from PIL import Image, ImageTk
+from tkinter import Tk, Canvas, Label
+from tkinter.messagebox import showinfo
 import numpy as np
 from game_maps import basic_maps
 
-root = Tk()
-TOTAL_GAMES = len(basic_maps)  # 总的游戏关数
-BOX_SIZE = 64    # 游戏的方块大小, 可设置访问(32, 64, 96, 128) 其实，可以任意
+# ==================== КОНСТАНТЫ ====================
 
+# Конфигурация игры
+TOTAL_GAMES = len(basic_maps)  # Общее количество уровней
+DEFAULT_BOX_SIZE = 64  # Размер игрового блока по умолчанию
+SUPPORTED_BOX_SIZES = (32, 64, 96, 128)  # Поддерживаемые размеры блоков
 
+# Игровые константы
+WALL = 0
+WORKER = 1
+BOX = 2
+PASSAGEWAY = 3
+DESTINATION = 4
+WORKER_IN_DEST = 5
+BOX_IN_DEST = 6
+
+# Направления движения
 DIRECTIONS = {
     "Up": (-1, 0, -2, 0),
     "Down": (1, 0, 2, 0),
@@ -31,199 +43,310 @@ DIRECTIONS = {
     "Right": (0, 1, 0, 2),
 }
 
+# Пути к изображениям
+IMAGE_PATHS = {
+    'wall': 'images\\Wall.jpg',
+    'worker': 'images\\Worker.jpg',
+    'worker_in_dest': 'images\\WorkerInDest.jpg',
+    'w_up': 'images\\w_up.jpg',
+    'w_up_in': 'images\\w_up_in.jpg',
+    'w_down': 'images\\w_down.jpg',
+    'w_down_in': 'images\\w_down_in.jpg',
+    'w_left': 'images\\w_left.jpg',
+    'w_left_in': 'images\\w_left_in.jpg',
+    'w_right': 'images\\w_right.jpg',
+    'w_right_in': 'images\\w_right_in.jpg',
+    'box': 'images\\Box.jpg',
+    'passageway': 'images\\Passageway.jpg',
+    'destination': 'images\\Destination.jpg',
+    'redbox': 'images\\redbox.jpg',
+    'restart': 'images\\restart.png'
+}
 
-def resized_image(img_name, w_box=BOX_SIZE, h_box=BOX_SIZE):
-    """ 对图片进行按比例缩放处理, 返回tk支持的图片对象"""
-    img = pil.Image.open(img_name)
-    w, h = img.size
-    if w > h:
-        width = w_box
-        height = int(h_box * (1.0 * h / w))
+
+# ==================== ФУНКЦИИ ====================
+
+def resized_image(img_name, width=64, height=64):
+    """Масштабирует изображение с сохранением пропорций"""
+    img = Image.open(img_name)
+    original_width, original_height = img.size
+
+    # Сохраняем пропорции
+    if original_width > original_height:
+        new_width = width
+        new_height = int(height * (original_height / original_width))
     else:
-        height = h_box
-        width = int(w_box * (1.0 * w / h))
-    img1 = img.resize((width, height), pil.Image.ANTIALIAS)
-    return ImageTk.PhotoImage(img1)
+        new_height = height
+        new_width = int(width * (original_width / original_height))
+
+    resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    return ImageTk.PhotoImage(resized_img)
 
 
-def create_game_window(width, height):
-    """ 创建游戏窗口，并使其屏幕居中 """
-    screenwidth = root.winfo_screenwidth()
-    screenheight = root.winfo_screenheight()
-    size = '%dx%d+%d+%d' % (width, height, (screenwidth - width)/2, (screenheight - height)/3)
-    root.geometry(size)
+def create_centered_window(root, width, height):
+    """Создает окно, центрированное на экране"""
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    x_position = (screen_width - width) // 2
+    y_position = (screen_height - height) // 3
+
+    root.geometry(f'{width}x{height}+{x_position}+{y_position}')
 
 
-# 加载游戏中用到的所有图片
-imgs = [resized_image('images\\Wall.jpg'),
-        {
-            'Stop': (resized_image('images\\Worker.jpg'), resized_image('images\\WorkerInDest.jpg')),
-            'Up': (resized_image('images\\w_up.jpg'), resized_image('images\\w_up_in.jpg')),
-            'Down': (resized_image('images\\w_down.jpg'), resized_image('images\\w_down_in.jpg')),
-            'Left': (resized_image('images\\w_left.jpg'), resized_image('images\\w_left_in.jpg')),
-            'Right': (resized_image('images\\w_right.jpg'), resized_image('images\\w_right_in.jpg'))
-        },
-        resized_image('images\\Box.jpg'),
-        resized_image('images\\Passageway.jpg'),
-        resized_image('images\\Destination.jpg'),
-        resized_image('images\\WorkerInDest.jpg'),
-        resized_image('images\\redbox.jpg')]
+# ==================== НАСТРОЙКА ПРИЛОЖЕНИЯ ====================
 
-# 0-墙，1-人，2-箱子，3-路，4-目的地, 5-人在目的地，6-箱子在目的地
-Wall, Worker, Box, Passageway, Destination, WorkerInDest, BoxInDest = (0, 1, 2, 3, 4, 5, 6)
+root = Tk()
+BOX_SIZE = DEFAULT_BOX_SIZE
+
+# Загрузка изображений
+game_images = [
+    resized_image(IMAGE_PATHS['wall'], BOX_SIZE, BOX_SIZE),  # Стена
+    {
+        'Stop': (
+            resized_image(IMAGE_PATHS['worker'], BOX_SIZE, BOX_SIZE),
+            resized_image(IMAGE_PATHS['worker_in_dest'], BOX_SIZE, BOX_SIZE)
+        ),
+        'Up': (
+            resized_image(IMAGE_PATHS['w_up'], BOX_SIZE, BOX_SIZE),
+            resized_image(IMAGE_PATHS['w_up_in'], BOX_SIZE, BOX_SIZE)
+        ),
+        'Down': (
+            resized_image(IMAGE_PATHS['w_down'], BOX_SIZE, BOX_SIZE),
+            resized_image(IMAGE_PATHS['w_down_in'], BOX_SIZE, BOX_SIZE)
+        ),
+        'Left': (
+            resized_image(IMAGE_PATHS['w_left'], BOX_SIZE, BOX_SIZE),
+            resized_image(IMAGE_PATHS['w_left_in'], BOX_SIZE, BOX_SIZE)
+        ),
+        'Right': (
+            resized_image(IMAGE_PATHS['w_right'], BOX_SIZE, BOX_SIZE),
+            resized_image(IMAGE_PATHS['w_right_in'], BOX_SIZE, BOX_SIZE)
+        )
+    },
+    resized_image(IMAGE_PATHS['box'], BOX_SIZE, BOX_SIZE),  # Ящик
+    resized_image(IMAGE_PATHS['passageway'], BOX_SIZE, BOX_SIZE),  # Проход
+    resized_image(IMAGE_PATHS['destination'], BOX_SIZE, BOX_SIZE),  # Цель
+    resized_image(IMAGE_PATHS['worker_in_dest'], BOX_SIZE, BOX_SIZE),  # Рабочий в цели
+    resized_image(IMAGE_PATHS['redbox'], BOX_SIZE, BOX_SIZE)  # Ящик в цели
+]
 
 
 class BoxGame:
     def __init__(self, game_index=1):
         """
-            game_index : 游戏关数, 从1开始
+        Инициализация игры
+
+        Args:
+            game_index (int): Номер уровня, начинается с 1
         """
-        self.game_index = max([1, game_index])
+        self.game_index = max(1, game_index)
         self.game_steps = 0
         self.screen = None
         self.direction = "Stop"
+        self.current_map = None
+        self.rows = 0
+        self.cols = 0
+        self.worker_x = 0
+        self.worker_y = 0
 
     def start_game(self, *args):
-        if self.screen is not None:
-            self.screen.forget()
-            del self.screen
+        """Запуск или перезапуск игры"""
+        self._cleanup_previous_game()
 
-            self.btn_refresh.forget()
-            del self.btn_refresh
-
-        # 获得当前关卡的地图
-        self.cur_map = np.asarray(basic_maps[self.game_index-1], dtype=np.int)
-        self.rows, self.cols = self.cur_map.shape[0:2]   # 地图的行数, 列数
-        self.x, self.y = 0, 0                            # 推箱工人的位置 (self.x, self.y)
-        self.game_steps = 0                              # 当前关的步数
+        # Загрузка карты текущего уровня
+        self.current_map = np.asarray(basic_maps[self.game_index - 1], dtype=np.int32)
+        self.rows, self.cols = self.current_map.shape[0:2]
+        self.worker_x, self.worker_y = 0, 0
+        self.game_steps = 0
         self.direction = "Stop"
 
-        # 创建并刷新游戏界面
-        win_width = self.cols * BOX_SIZE + BOX_SIZE/2 + 40
-        win_height = self.rows * BOX_SIZE + BOX_SIZE/2 + 100
-        create_game_window(win_width, win_height)
+        # Создание игрового интерфейса
+        self._create_game_interface()
 
-        self.game_title()
-        self.screen = Canvas(root, bg='white', width=BOX_SIZE * self.cols, height=BOX_SIZE * self.rows)
-        self.screen.configure(highlightthickness=0)      # 去掉画布的边框
-        self.refresh_screen()                            # 动态刷新游戏界面
-        self.screen.bind("<KeyPress>", self.play_game)   # 绑定键盘事件，进行游戏操作
+        # Создание кнопки перезапуска
+        self._create_restart_button()
+
+    def _cleanup_previous_game(self):
+        """Очистка предыдущей игровой сессии"""
+        if self.screen is not None:
+            self.screen.forget()
+            self.screen = None
+
+        if hasattr(self, 'btn_refresh'):
+            self.btn_refresh.forget()
+            delattr(self, 'btn_refresh')
+
+    def _create_game_interface(self):
+        """Создание игрового интерфейса"""
+        window_width = self.cols * BOX_SIZE + BOX_SIZE // 2 + 40
+        window_height = self.rows * BOX_SIZE + BOX_SIZE // 2 + 100
+
+        create_centered_window(root, window_width, window_height)
+        self._update_game_title()
+
+        self.screen = Canvas(
+            root,
+            bg='white',
+            width=BOX_SIZE * self.cols,
+            height=BOX_SIZE * self.rows
+        )
+        self.screen.configure(highlightthickness=0)
+        self._refresh_screen()
+        self.screen.bind("<KeyPress>", self._handle_key_press)
         self.screen.pack(pady=20)
         self.screen.focus_set()
 
+    def _create_restart_button(self):
+        """Создание кнопки перезапуска игры"""
         self.btn_refresh = Label(root, width=150, height=50)
-        tk_img = resized_image('images\\restart.png', 120, 120)
-        self.btn_refresh.image = tk_img
-        self.btn_refresh.config(image=tk_img)
-        self.btn_refresh.bind("<Button-1>", self.start_game)  # 重新开始游戏，可以按“空格”来完成
+        restart_image = resized_image(IMAGE_PATHS['restart'], 120, 120)
+        self.btn_refresh.image = restart_image
+        self.btn_refresh.config(image=restart_image)
+        self.btn_refresh.bind("<Button-1>", self.start_game)
         self.btn_refresh.pack()
 
-    # 刷新绘制整个游戏区域图形
-    def refresh_screen(self):
-        self.screen.delete('all')    # 先清空画布，这句话很重要，否则，大的游戏界面刷新会越来越慢
-        for i in range(0, self.rows):
-            for j in range(0, self.cols):
-                if self.cur_map[i, j] == Worker:
-                    self.x, self.y = i, j
-                    _img = imgs[Worker][self.direction][0]
-                elif self.cur_map[i, j] == WorkerInDest:
-                    self.x, self.y = i, j
-                    _img = imgs[Worker][self.direction][1]
-                elif self.cur_map[i, j] == -1:
-                    _img = None
-                else:
-                    _img = imgs[self.cur_map[i, j]]  # 获得对应位置的图片，并进行绘制
-                if _img:
-                    self.screen.create_image((j * BOX_SIZE + BOX_SIZE / 2, i * BOX_SIZE + BOX_SIZE / 2), image=_img)
+    def _refresh_screen(self):
+        """Обновление игрового экрана"""
+        self.screen.delete('all')
+
+        for i in range(self.rows):
+            for j in range(self.cols):
+                cell_value = self.current_map[i, j]
+                image_to_draw = self._get_cell_image(cell_value, i, j)
+
+                if image_to_draw:
+                    x_position = j * BOX_SIZE + BOX_SIZE // 2
+                    y_position = i * BOX_SIZE + BOX_SIZE // 2
+                    self.screen.create_image((x_position, y_position), image=image_to_draw)
+
         root.update()
         self.screen.focus_set()
 
-    def play_game(self, event):
-        key_code = event.keysym
+    def _get_cell_image(self, cell_value, i, j):
+        """Получение изображения для клетки"""
+        if cell_value == WORKER:
+            self.worker_x, self.worker_y = i, j
+            return game_images[WORKER][self.direction][0]
+        elif cell_value == WORKER_IN_DEST:
+            self.worker_x, self.worker_y = i, j
+            return game_images[WORKER][self.direction][1]
+        elif cell_value == -1:
+            return None
+        else:
+            return game_images[cell_value]
 
-        if key_code in DIRECTIONS.keys():  # 按方向键 "Up", "Down", "Left", "Right" 键的方向，进行移动
-            self.move_to(key_code)
-        elif key_code == "space":          # 按空格键，重新开始游戏
+    def _handle_key_press(self, event):
+        """Обработка нажатий клавиш"""
+        key = event.keysym
+
+        if key in DIRECTIONS:
+            self._move_worker(key)
+        elif key == "space":
             self.start_game()
 
-    def move_to(self, move_direct):
-        self.direction = move_direct   # 记录移动方向，可用来绘制搬运工人的不同方向上的图像
-        m = DIRECTIONS[move_direct]    # 获得移动方向的位移信息
-        x1, y1, x2, y2 = (self.x + m[0], self.y + m[1], self.x + m[2], self.y + m[3])  # 获得移动方向的后2个位置的坐标
+    def _move_worker(self, direction):
+        """Перемещение рабочего в указанном направлении"""
+        self.direction = direction
+        move_data = DIRECTIONS[direction]
 
-        p1, p2 = None, None   # 按某方向移动前，需要判断该方向前2个格子的状态，才能决定下一步行为
-        if self.is_valid_position(x1, y1):  # 判断是否在游戏区域
-            p1 = self.cur_map[x1, y1]
-        if self.is_valid_position(x2, y2):
-            p2 = self.cur_map[x2, y2]
+        next_x = self.worker_x + move_data[0]
+        next_y = self.worker_y + move_data[1]
+        after_next_x = self.worker_x + move_data[2]
+        after_next_y = self.worker_y + move_data[3]
 
-        if p1 == Wall or not self.is_valid_position(x1, y1):  # p1 是墙
+        next_cell = self._get_cell_value(next_x, next_y)
+        after_next_cell = self._get_cell_value(after_next_x, after_next_y)
+
+        if not self._is_valid_move(next_cell, after_next_cell, next_x, next_y, after_next_x, after_next_y):
             return
 
-        if p1 == Passageway:      # P1处为通道
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x1, y1] = Worker
-        if p1 == Destination:     # P1处为目的地
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x1, y1] = WorkerInDest
-        if p1 == Box:
-            if p2 == Wall or not self.is_valid_position(x2, y2) or p2 == Box:  # P2是墙 或 出界 或为箱子
-                return
-        if p1 == Box and p2 == Passageway:
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x2, y2] = Box
-            self.cur_map[x1, y1] = Worker
-        if p1 == Box and p2 == Destination:
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x2, y2] = BoxInDest
-            self.cur_map[x1, y1] = Worker
-        if p1 == BoxInDest and p2 == Passageway:
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x2, y2] = Box
-            self.cur_map[x1, y1] = WorkerInDest
-        if p1 == BoxInDest and p2 == Destination:
-            self.move_workman()
-            self.x = x1
-            self.y = y1
-            self.cur_map[x2, y2] = BoxInDest
-            self.cur_map[x1, y1] = WorkerInDest
+        self._process_movement(next_x, next_y, after_next_x, after_next_y, next_cell, after_next_cell)
 
-        self.game_steps += 1  # 统计已经用的步数
-        self.game_title()
-        self.refresh_screen()
+        self.game_steps += 1
+        self._update_game_title()
+        self._refresh_screen()
 
-        if self.is_passed():
-            showinfo(title="提示", message=" 恭喜你顺利通过第({})关! \n\n一共用了({})步".format(self.game_index, self.game_steps))
-            self.game_index = self.game_index % TOTAL_GAMES + 1
-            self.start_game()
+        if self._is_level_completed():
+            self._handle_level_completion()
 
-    def move_workman(self):
-        if self.cur_map[self.x, self.y] == Worker:
-            self.cur_map[self.x, self.y] = Passageway
-        elif self.cur_map[self.x, self.y] == WorkerInDest:
-            self.cur_map[self.x, self.y] = Destination
+    def _get_cell_value(self, x, y):
+        """Получение значения клетки"""
+        if self._is_within_bounds(x, y):
+            return self.current_map[x, y]
+        return None
 
-    def is_valid_position(self, row, col):  # 判断坐标是否在地图范围内
+    def _is_valid_move(self, next_cell, after_next_cell, next_x, next_y, after_next_x, after_next_y):
+        """Проверка валидности хода"""
+        if next_cell == WALL or not self._is_within_bounds(next_x, next_y):
+            return False
+
+        if next_cell == BOX:
+            if (after_next_cell == WALL or
+                    not self._is_within_bounds(after_next_x, after_next_y) or
+                    after_next_cell == BOX):
+                return False
+
+        return True
+
+    def _process_movement(self, next_x, next_y, after_next_x, after_next_y, next_cell, after_next_cell):
+        """Обработка движения рабочего"""
+        self._clear_worker_position()
+
+        if next_cell == PASSAGEWAY:
+            self.current_map[next_x, next_y] = WORKER
+        elif next_cell == DESTINATION:
+            self.current_map[next_x, next_y] = WORKER_IN_DEST
+        elif next_cell == BOX:
+            if after_next_cell == PASSAGEWAY:
+                self.current_map[after_next_x, after_next_y] = BOX
+                self.current_map[next_x, next_y] = WORKER
+            elif after_next_cell == DESTINATION:
+                self.current_map[after_next_x, after_next_y] = BOX_IN_DEST
+                self.current_map[next_x, next_y] = WORKER
+        elif next_cell == BOX_IN_DEST:
+            if after_next_cell == PASSAGEWAY:
+                self.current_map[after_next_x, after_next_y] = BOX
+                self.current_map[next_x, next_y] = WORKER_IN_DEST
+            elif after_next_cell == DESTINATION:
+                self.current_map[after_next_x, after_next_y] = BOX_IN_DEST
+                self.current_map[next_x, next_y] = WORKER_IN_DEST
+
+        self.worker_x, self.worker_y = next_x, next_y
+
+    def _clear_worker_position(self):
+        """Очистка текущей позиции рабочего"""
+        if self.current_map[self.worker_x, self.worker_y] == WORKER:
+            self.current_map[self.worker_x, self.worker_y] = PASSAGEWAY
+        elif self.current_map[self.worker_x, self.worker_y] == WORKER_IN_DEST:
+            self.current_map[self.worker_x, self.worker_y] = DESTINATION
+
+    def _is_within_bounds(self, row, col):
+        """Проверка, находится ли позиция в пределах карты"""
         return 0 <= row < self.rows and 0 <= col < self.cols
 
-    def game_title(self):  # 为简化，直接在窗体标题中，显示游戏进度信息
-        root.title("推箱子 - 第({}/{})关    总步数: {}".format(self.game_index, TOTAL_GAMES, self.game_steps))
+    def _update_game_title(self):
+        """Обновление заголовка окна"""
+        title = f"推箱子 - 第({self.game_index}/{TOTAL_GAMES})关    总步数: {self.game_steps}"
+        root.title(title)
 
-    def is_passed(self):  # 过关条件: 不存在空目的地 及 人在目的地的格子
-        return not np.any([self.cur_map == Destination, self.cur_map == WorkerInDest])
+    def _is_level_completed(self):
+        """Проверка завершения уровня"""
+        return not np.any([
+            self.current_map == DESTINATION,
+            self.current_map == WORKER_IN_DEST
+        ])
+
+    def _handle_level_completion(self):
+        """Обработка завершения уровня"""
+        message = f"恭喜你顺利通过第({self.game_index})关!\n\n一共用了({self.game_steps})步"
+        showinfo(title="提示", message=message)
+
+        self.game_index = self.game_index % TOTAL_GAMES + 1
+        self.start_game()
 
 
 if __name__ == "__main__":
-    start_index = 1   # 自己设置要开始玩完的关卡
-    BoxGame(game_index=start_index).start_game()
+    START_LEVEL = 1
+    BoxGame(game_index=START_LEVEL).start_game()
     root.mainloop()
