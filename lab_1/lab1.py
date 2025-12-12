@@ -55,6 +55,7 @@ db.init_app(app)
 def load_user(user_id):
     return User.query.get(user_id)
 
+
 # // ------------------------------ DECORATORS ------------------------------ //
 
 def admin_only(func):
@@ -66,6 +67,7 @@ def admin_only(func):
         return abort(403)
     return decorated_function
 
+
 def member_only(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
@@ -75,6 +77,7 @@ def member_only(func):
         return abort(403)
     return decorated_function
 
+
 # // ------------------------------ TEMPLATE FILTERS ------------------------------ //
 
 @app.template_filter('format_currency')
@@ -82,10 +85,12 @@ def format_currency(price: int):
     '''Format currency'''
     return currency(float(price))
 
+
 @app.template_filter('format_date')
 def format_date(date):
     '''Format Date'''
     return date.strftime('%d/%m/%Y')
+
 
 @app.template_filter('refactor_categories')
 def refactor_categories(categories: list):
@@ -95,10 +100,12 @@ def refactor_categories(categories: list):
     category_names = [pc.category.name.replace('And', ' & ') for pc in categories]
     return ', '.join(category_names)
 
+
 @app.template_filter('get_stars')
 def get_stars(rating: int):
     '''Convert Rating into stars'''
     return '★' * rating
+
 
 @app.template_filter('get_average_rating')
 def get_average_rating(reviews):
@@ -108,20 +115,24 @@ def get_average_rating(reviews):
     average_rating = sum([review.rating for review in reviews]) // len(reviews)
     return '★' * average_rating
 
+
 @app.template_filter('get_number_of_reviews')
 def get_number_of_reviews(reviews):
     '''Convert Rating into stars'''
     return len(reviews)
+
 
 @app.template_filter('get_order_count')
 def get_order_count(orders):
     '''Get number of products in total (from Order object)'''
     return sum([order.quantity for order in orders])
 
+
 @app.template_filter('get_products_count')
 def get_products_count(details):
     '''Get Number of products in total (from TransactionDetail object)'''
     return sum([detail.quantity for detail in details])
+
 
 @app.template_filter('get_current_sum')
 def get_current_sum(orders):
@@ -129,20 +140,23 @@ def get_current_sum(orders):
     total_cost = sum([order.product.price * order.quantity for order in orders])
     return currency(float(total_cost))
 
+
 @app.template_filter('get_price_sum')
 def get_price_sum(transactions):
     '''Get Total Cost (from Transaction object)'''
     total_cost = sum([transaction.price * transaction.quantity
-                     for transaction in transactions])
+                      for transaction in transactions])
     return currency(float(total_cost))
+
 
 @app.template_filter('get_total_payment')
 def get_total_payment(transaction_info):
     '''Get Total Cost + Delivery Cost in currency format (from Transaction Object)'''
     products_cost = sum([detail.price * detail.quantity
-                        for detail in transaction_info.details])
+                         for detail in transaction_info.details])
     total_cost = transaction_info.delivery_cost + products_cost
     return currency(float(total_cost))
+
 
 # // ------------------------------ BASIC FUNCTIONALITY ------------------------------ //
 
@@ -152,6 +166,7 @@ def home(page=1):
     products = Product.query.paginate(page, 9)
     return render_template('index.html', products=products)
 
+
 @app.route('/category/<int:id>')
 @app.route('/category/<int:id>/<int:page>')
 def get_by_category(id: int, page=1):
@@ -159,6 +174,7 @@ def get_by_category(id: int, page=1):
         category_id=id
     ).paginate(page, 9)
     return render_template('index.html', products=products)
+
 
 @app.route('/search')
 @app.route('/search/<int:page>')
@@ -168,6 +184,7 @@ def search_product(page=1):
         Product.name.like(f'%{query}%')
     ).paginate(page, 9)
     return render_template('index.html', products=products)
+
 
 # // ------------------------------ USER AUTHENTICATION ------------------------------ //
 
@@ -197,6 +214,7 @@ def register():
         return redirect(url_for('login'))
     return render_template('auth.html', form=form, purpose='register')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -208,18 +226,20 @@ def login():
             flash("User doesn't exist! Please register!")
             return redirect(url_for('register'))
         elif check_password_hash(existing_user.password,
-                               request.form.get('password')):
+                                 request.form.get('password')):
             login_user(existing_user)
             return redirect(url_for('home'))
         else:
             flash('Wrong email or password!')
     return render_template('auth.html', form=form, purpose='login')
 
+
 @app.route('/logout')
 @login_required
 def logout():
     logout_user()
     return redirect(url_for('home'))
+
 
 # // ------------------------------ PRODUCT MANAGEMENT (CRUD) ------------------------------ //
 
@@ -251,6 +271,7 @@ def add_product():
                 db.session.commit()
             return redirect(url_for('home'))
     return render_template('product_manager.html', purpose='add', form=form)
+
 
 @app.route('/products/update/<int:id>', methods=['GET', 'POST'])
 @admin_only
@@ -290,6 +311,7 @@ def update_product(id: int):
         form=form
     )
 
+
 @app.route('/products/<int:id>', methods=['GET', 'POST'])
 def get_product(id: int):
     product = Product.query.filter_by(id=id).first()
@@ -322,6 +344,7 @@ def get_product(id: int):
         purpose='get'
     )
 
+
 # // ------------------------------ CART FUNCTIONS ------------------------------ //
 
 @app.route('/cart/<int:user_id>/add/<int:product_id>', methods=['POST'])
@@ -340,6 +363,7 @@ def add_to_cart(product_id, user_id):
         db.session.commit()
     return redirect(url_for('home'))
 
+
 @app.route('/cart/<int:user_id>')
 @login_required
 @member_only
@@ -349,6 +373,7 @@ def get_cart(user_id):
         from flask import abort
         return abort(403)
     return render_template('cart.html', orders=orders)
+
 
 @app.route('/cart/<int:user_id>/increment_quantity/<int:product_id>')
 @login_required
@@ -364,6 +389,7 @@ def increment_product_quantity(user_id, product_id):
         product.stock -= 1
         db.session.commit()
     return redirect(url_for('get_cart', user_id=user_id))
+
 
 @app.route('/cart/<int:user_id>/decrement_quantity/<int:product_id>')
 @login_required
@@ -381,6 +407,7 @@ def decrement_product_quantity(user_id, product_id):
             db.session.delete(order)
         db.session.commit()
     return redirect(url_for('get_cart', user_id=user_id))
+
 
 # // ------------------------------ CHECKOUT ------------------------------ //
 
@@ -427,6 +454,7 @@ def checkout(user_id):
         ))
     return render_template('checkout.html', form=form, details=details)
 
+
 # // ------------------------------ TRANSACTION HISTORY ------------------------------ //
 
 @app.route('/history/<int:user_id>')
@@ -443,6 +471,7 @@ def get_all_transactions(user_id):
         purpose='show_all'
     )
 
+
 @app.route('/history/<int:user_id>/<int:transaction_id>', methods=['GET', 'POST'])
 @login_required
 @member_only
@@ -456,6 +485,7 @@ def get_transaction_history(user_id, transaction_id):
         transaction=transaction,
         purpose='single'
     )
+
 
 @app.route('/history/<int:user_id>/<int:transaction_id>/delivered', methods=['GET', 'POST'])
 @login_required
@@ -474,6 +504,7 @@ def product_delivered(user_id, transaction_id):
         user_id=user_id,
         transaction_id=transaction_id
     ))
+
 
 # // ------------------------------ DRIVER CODE ------------------------------ //
 
