@@ -48,33 +48,49 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize Database
 db.init_app(app)
+
+
 # Paste code from init.txt here
 
 # Default loading user function
 @login_manager.user_loader
 def load_user(user_id):
+    """Load user by ID for Flask-Login.
+
+    Args:
+        user_id (int): The ID of the user to load.
+
+    Returns:
+        User: User object if found, None otherwise.
+    """
     return User.query.get(user_id)
 
 
 # // ------------------------------ DECORATORS ------------------------------ //
 
 def admin_only(func):
+    """Decorator to restrict access to admin users only (user ID = 1)."""
+
     @wraps(func)
     def decorated_function(*args, **kwargs):
         if current_user.is_authenticated and current_user.id == 1:
             return func(*args, **kwargs)
         from flask import abort
         return abort(403)
+
     return decorated_function
 
 
 def member_only(func):
+    """Decorator to restrict access to member users only (non-admin users)."""
+
     @wraps(func)
     def decorated_function(*args, **kwargs):
         if current_user.is_authenticated and current_user.id != 1:
             return func(*args, **kwargs)
         from flask import abort
         return abort(403)
+
     return decorated_function
 
 
@@ -82,19 +98,40 @@ def member_only(func):
 
 @app.template_filter('format_currency')
 def format_currency(price: int):
-    '''Format currency'''
+    """Format integer price as local currency.
+
+    Args:
+        price (int): Price value to format.
+
+    Returns:
+        str: Formatted currency string.
+    """
     return currency(float(price))
 
 
 @app.template_filter('format_date')
 def format_date(date):
-    '''Format Date'''
+    """Format date object to DD/MM/YYYY format.
+
+    Args:
+        date (datetime.date): Date object to format.
+
+    Returns:
+        str: Formatted date string.
+    """
     return date.strftime('%d/%m/%Y')
 
 
 @app.template_filter('refactor_categories')
 def refactor_categories(categories: list):
-    '''Change the categories into a more readable string format'''
+    """Convert list of category objects to readable string.
+
+    Args:
+        categories (list): List of ProductCategory objects.
+
+    Returns:
+        str: Comma-separated category names or 'Miscellaneous' if empty.
+    """
     if len(categories) == 0:
         return 'Miscellaneous'
     category_names = [pc.category.name.replace('And', ' & ') for pc in categories]
@@ -103,13 +140,27 @@ def refactor_categories(categories: list):
 
 @app.template_filter('get_stars')
 def get_stars(rating: int):
-    '''Convert Rating into stars'''
+    """Convert numeric rating to star symbols.
+
+    Args:
+        rating (int): Numeric rating from 1 to 5.
+
+    Returns:
+        str: String of star symbols.
+    """
     return '★' * rating
 
 
 @app.template_filter('get_average_rating')
 def get_average_rating(reviews):
-    '''Get average rating and convert them into stars'''
+    """Calculate average rating from reviews and convert to stars.
+
+    Args:
+        reviews (list): List of ProductReview objects.
+
+    Returns:
+        str: String of star symbols or 'Not Rated' if no reviews.
+    """
     if len(reviews) == 0:
         return 'Not Rated'
     average_rating = sum([review.rating for review in reviews]) // len(reviews)
@@ -118,32 +169,67 @@ def get_average_rating(reviews):
 
 @app.template_filter('get_number_of_reviews')
 def get_number_of_reviews(reviews):
-    '''Convert Rating into stars'''
+    """Get total number of reviews.
+
+    Args:
+        reviews (list): List of ProductReview objects.
+
+    Returns:
+        int: Number of reviews.
+    """
     return len(reviews)
 
 
 @app.template_filter('get_order_count')
 def get_order_count(orders):
-    '''Get number of products in total (from Order object)'''
+    """Calculate total quantity of products in cart orders.
+
+    Args:
+        orders (list): List of Order objects.
+
+    Returns:
+        int: Total quantity of products.
+    """
     return sum([order.quantity for order in orders])
 
 
 @app.template_filter('get_products_count')
 def get_products_count(details):
-    '''Get Number of products in total (from TransactionDetail object)'''
+    """Calculate total quantity of products in transaction details.
+
+    Args:
+        details (list): List of TransactionDetail objects.
+
+    Returns:
+        int: Total quantity of products.
+    """
     return sum([detail.quantity for detail in details])
 
 
 @app.template_filter('get_current_sum')
 def get_current_sum(orders):
-    '''Get Temporary Total Cost in Cart (from Order object)'''
+    """Calculate total cost of items in cart.
+
+    Args:
+        orders (list): List of Order objects.
+
+    Returns:
+        str: Formatted currency string of total cost.
+    """
     total_cost = sum([order.product.price * order.quantity for order in orders])
     return currency(float(total_cost))
 
 
 @app.template_filter('get_price_sum')
 def get_price_sum(transactions):
-    '''Get Total Cost (from Transaction object)'''
+    """Calculate total cost from transaction details.
+
+    Args:
+        transactions (list): List of TransactionDetail objects.
+
+    Returns:
+        str: Formatted currency string of total cost.
+    """
     total_cost = sum([transaction.price * transaction.quantity
                       for transaction in transactions])
     return currency(float(total_cost))
@@ -151,7 +237,14 @@ def get_price_sum(transactions):
 
 @app.template_filter('get_total_payment')
 def get_total_payment(transaction_info):
-    '''Get Total Cost + Delivery Cost in currency format (from Transaction Object)'''
+    """Calculate total payment including delivery cost.
+
+    Args:
+        transaction_info (Transaction): Transaction object.
+
+    Returns:
+        str: Formatted currency string of total payment.
+    """
     products_cost = sum([detail.price * detail.quantity
                          for detail in transaction_info.details])
     total_cost = transaction_info.delivery_cost + products_cost
@@ -163,6 +256,14 @@ def get_total_payment(transaction_info):
 @app.route('/')
 @app.route('/<int:page>')
 def home(page=1):
+    """Render home page with paginated products.
+
+    Args:
+        page (int, optional): Page number for pagination. Defaults to 1.
+
+    Returns:
+        str: Rendered HTML template.
+    """
     products = Product.query.paginate(page, 9)
     return render_template('index.html', products=products)
 
@@ -170,6 +271,15 @@ def home(page=1):
 @app.route('/category/<int:id>')
 @app.route('/category/<int:id>/<int:page>')
 def get_by_category(id: int, page=1):
+    """Render products filtered by category with pagination.
+
+    Args:
+        id (int): Category ID to filter by.
+        page (int, optional): Page number for pagination. Defaults to 1.
+
+    Returns:
+        str: Rendered HTML template.
+    """
     products = Product.query.join(ProductCategory).filter_by(
         category_id=id
     ).paginate(page, 9)
@@ -179,6 +289,14 @@ def get_by_category(id: int, page=1):
 @app.route('/search')
 @app.route('/search/<int:page>')
 def search_product(page=1):
+    """Search products by name with pagination.
+
+    Args:
+        page (int, optional): Page number for pagination. Defaults to 1.
+
+    Returns:
+        str: Rendered HTML template.
+    """
     query = request.args.get('search')
     products = Product.query.filter(
         Product.name.like(f'%{query}%')
@@ -190,6 +308,11 @@ def search_product(page=1):
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    """Handle user registration.
+
+    Returns:
+        str: Rendered registration form or redirect to login.
+    """
     form = RegisterForm()
     if form.validate_on_submit():
         existing_user = User.query.filter_by(
@@ -217,6 +340,11 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """Handle user login.
+
+    Returns:
+        str: Rendered login form or redirect to home.
+    """
     form = LoginForm()
     if form.validate_on_submit():
         existing_user = User.query.filter_by(
@@ -237,6 +365,11 @@ def login():
 @app.route('/logout')
 @login_required
 def logout():
+    """Handle user logout.
+
+    Returns:
+        werkzeug.wrappers.Response: Redirect to home page.
+    """
     logout_user()
     return redirect(url_for('home'))
 
@@ -246,6 +379,11 @@ def logout():
 @app.route('/products/add', methods=['GET', 'POST'])
 @admin_only
 def add_product():
+    """Add new product (admin only).
+
+    Returns:
+        str: Rendered product form or redirect to home.
+    """
     form = ProductForm()
     if form.validate_on_submit():
         existing_product = Product.query.filter_by(
@@ -276,6 +414,14 @@ def add_product():
 @app.route('/products/update/<int:id>', methods=['GET', 'POST'])
 @admin_only
 def update_product(id: int):
+    """Update existing product (admin only).
+
+    Args:
+        id (int): Product ID to update.
+
+    Returns:
+        str: Rendered product form or redirect to product page.
+    """
     product = Product.query.filter_by(id=id).first()
     form = ProductForm(
         name=product.name,
@@ -314,6 +460,14 @@ def update_product(id: int):
 
 @app.route('/products/<int:id>', methods=['GET', 'POST'])
 def get_product(id: int):
+    """View product details and handle reviews.
+
+    Args:
+        id (int): Product ID to view.
+
+    Returns:
+        str: Rendered product page.
+    """
     product = Product.query.filter_by(id=id).first()
     cart_form = CartForm(product.stock)
     review_form = ReviewForm()
@@ -349,6 +503,15 @@ def get_product(id: int):
 
 @app.route('/cart/<int:user_id>/add/<int:product_id>', methods=['POST'])
 def add_to_cart(product_id, user_id):
+    """Add product to user's cart.
+
+    Args:
+        product_id (int): Product ID to add.
+        user_id (int): User ID.
+
+    Returns:
+        werkzeug.wrappers.Response: Redirect to home or cart.
+    """
     product = Product.query.filter_by(id=product_id).first()
     if int(request.form.get('count')) > product.stock:
         return redirect(url_for('home'))
@@ -368,6 +531,14 @@ def add_to_cart(product_id, user_id):
 @login_required
 @member_only
 def get_cart(user_id):
+    """View user's shopping cart.
+
+    Args:
+        user_id (int): User ID.
+
+    Returns:
+        str: Rendered cart page.
+    """
     orders = Order.query.filter_by(user=current_user)
     if user_id != current_user.id:
         from flask import abort
@@ -379,6 +550,15 @@ def get_cart(user_id):
 @login_required
 @member_only
 def increment_product_quantity(user_id, product_id):
+    """Increment product quantity in cart.
+
+    Args:
+        user_id (int): User ID.
+        product_id (int): Product ID.
+
+    Returns:
+        werkzeug.wrappers.Response: Redirect to cart.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -395,6 +575,15 @@ def increment_product_quantity(user_id, product_id):
 @login_required
 @member_only
 def decrement_product_quantity(user_id, product_id):
+    """Decrement product quantity in cart.
+
+    Args:
+        user_id (int): User ID.
+        product_id (int): Product ID.
+
+    Returns:
+        werkzeug.wrappers.Response: Redirect to cart.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -415,6 +604,14 @@ def decrement_product_quantity(user_id, product_id):
 @login_required
 @member_only
 def checkout(user_id):
+    """Process checkout and create transaction.
+
+    Args:
+        user_id (int): User ID.
+
+    Returns:
+        str: Rendered checkout form or redirect to transaction history.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -461,6 +658,14 @@ def checkout(user_id):
 @login_required
 @member_only
 def get_all_transactions(user_id):
+    """View all user transactions.
+
+    Args:
+        user_id (int): User ID.
+
+    Returns:
+        str: Rendered transactions page.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -476,6 +681,15 @@ def get_all_transactions(user_id):
 @login_required
 @member_only
 def get_transaction_history(user_id, transaction_id):
+    """View details of specific transaction.
+
+    Args:
+        user_id (int): User ID.
+        transaction_id (int): Transaction ID.
+
+    Returns:
+        str: Rendered transaction details page.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -491,6 +705,15 @@ def get_transaction_history(user_id, transaction_id):
 @login_required
 @member_only
 def product_delivered(user_id, transaction_id):
+    """Mark transaction as delivered and paid.
+
+    Args:
+        user_id (int): User ID.
+        transaction_id (int): Transaction ID.
+
+    Returns:
+        werkzeug.wrappers.Response: Redirect to transaction details.
+    """
     if user_id != current_user.id:
         from flask import abort
         return abort(403)
@@ -509,4 +732,5 @@ def product_delivered(user_id, transaction_id):
 # // ------------------------------ DRIVER CODE ------------------------------ //
 
 if __name__ == '__main__':
+    """Main entry point for the Flask application."""
     app.run(debug=True)
