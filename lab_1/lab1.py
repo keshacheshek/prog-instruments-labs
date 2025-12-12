@@ -62,6 +62,7 @@ def admin_only(func):
     def decorated_function(*args, **kwargs):
         if current_user.is_authenticated and current_user.id == 1:
             return func(*args, **kwargs)
+        from flask import abort
         return abort(403)
     return decorated_function
 
@@ -70,6 +71,7 @@ def member_only(func):
     def decorated_function(*args, **kwargs):
         if current_user.is_authenticated and current_user.id != 1:
             return func(*args, **kwargs)
+        from flask import abort
         return abort(403)
     return decorated_function
 
@@ -90,8 +92,7 @@ def refactor_categories(categories: list):
     '''Change the categories into a more readable string format'''
     if len(categories) == 0:
         return 'Miscellaneous'
-    category_names = [pc.category.name.replace('And', ' & ')
-                      for pc in categories]
+    category_names = [pc.category.name.replace('And', ' & ') for pc in categories]
     return ', '.join(category_names)
 
 @app.template_filter('get_stars')
@@ -136,11 +137,11 @@ def get_price_sum(transactions):
     return currency(float(total_cost))
 
 @app.template_filter('get_total_payment')
-def get_total_payment(info):
+def get_total_payment(transaction_info):
     '''Get Total Cost + Delivery Cost in currency format (from Transaction Object)'''
-    products_cost = sum([transaction.price * transaction.quantity
-                        for transaction in info.details])
-    total_cost = info.delivery_cost + products_cost
+    products_cost = sum([detail.price * detail.quantity
+                        for detail in transaction_info.details])
+    total_cost = transaction_info.delivery_cost + products_cost
     return currency(float(total_cost))
 
 # // ------------------------------ BASIC FUNCTIONALITY ------------------------------ //
@@ -174,10 +175,10 @@ def search_product(page=1):
 def register():
     form = RegisterForm()
     if form.validate_on_submit():
-        find_user = User.query.filter_by(
+        existing_user = User.query.filter_by(
             email=request.form.get('email')
         ).first()
-        if find_user is None:
+        if existing_user is None:
             new_user = User(
                 name=request.form.get('name'),
                 email=request.form.get('email'),
@@ -200,16 +201,15 @@ def register():
 def login():
     form = LoginForm()
     if form.validate_on_submit():
-        print("Login")
-        find_user = User.query.filter_by(
+        existing_user = User.query.filter_by(
             email=request.form.get('email')
         ).first()
-        if find_user is None:
+        if existing_user is None:
             flash("User doesn't exist! Please register!")
             return redirect(url_for('register'))
-        elif check_password_hash(find_user.password,
+        elif check_password_hash(existing_user.password,
                                request.form.get('password')):
-            login_user(find_user)
+            login_user(existing_user)
             return redirect(url_for('home'))
         else:
             flash('Wrong email or password!')
@@ -228,10 +228,10 @@ def logout():
 def add_product():
     form = ProductForm()
     if form.validate_on_submit():
-        find_product = Product.query.filter_by(
+        existing_product = Product.query.filter_by(
             name=request.form.get('name')
         ).first()
-        if find_product is None:
+        if existing_product is None:
             new_product = Product(
                 name=request.form.get('name'),
                 description=request.form.get('description'),
@@ -296,22 +296,22 @@ def get_product(id: int):
     cart_form = CartForm(product.stock)
     review_form = ReviewForm()
     if current_user.is_authenticated and review_form.validate_on_submit():
-        find_product_review = ProductReview.query.filter_by(
+        existing_review = ProductReview.query.filter_by(
             product=product,
             user=current_user
         ).first()
-        if find_product_review:
+        if existing_review:
             with app.app_context():
-                db.session.delete(find_product_review)
+                db.session.delete(existing_review)
                 db.session.commit()
-        new_product_review = ProductReview(
+        new_review = ProductReview(
             user=current_user,
             product=product,
             rating=int(request.form.get('rating')),
             review=request.form.get('body')
         )
         with app.app_context():
-            db.session.add(new_product_review)
+            db.session.add(new_review)
             db.session.commit()
         return redirect(url_for('get_product', id=id))
     return render_template(
@@ -346,6 +346,7 @@ def add_to_cart(product_id, user_id):
 def get_cart(user_id):
     orders = Order.query.filter_by(user=current_user)
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     return render_template('cart.html', orders=orders)
 
@@ -354,6 +355,7 @@ def get_cart(user_id):
 @member_only
 def increment_product_quantity(user_id, product_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     product = Product.query.filter_by(id=product_id).first()
     order = Order.query.filter_by(user_id=user_id, product_id=product_id).first()
@@ -368,6 +370,7 @@ def increment_product_quantity(user_id, product_id):
 @member_only
 def decrement_product_quantity(user_id, product_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     product = Product.query.filter_by(id=product_id).first()
     order = Order.query.filter_by(user_id=user_id, product_id=product_id).first()
@@ -386,6 +389,7 @@ def decrement_product_quantity(user_id, product_id):
 @member_only
 def checkout(user_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     details = Order.query.filter_by(user=current_user)
     transaction_id = 0
@@ -430,6 +434,7 @@ def checkout(user_id):
 @member_only
 def get_all_transactions(user_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     transactions = Transaction.query.filter_by(user_id=user_id)
     return render_template(
@@ -443,6 +448,7 @@ def get_all_transactions(user_id):
 @member_only
 def get_transaction_history(user_id, transaction_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     transaction = Transaction.query.filter_by(id=transaction_id).first()
     return render_template(
@@ -456,6 +462,7 @@ def get_transaction_history(user_id, transaction_id):
 @member_only
 def product_delivered(user_id, transaction_id):
     if user_id != current_user.id:
+        from flask import abort
         return abort(403)
     transaction = Transaction.query.filter_by(id=transaction_id).first()
     with app.app_context():
