@@ -1,19 +1,28 @@
 # Web Development
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash
+)
 # Login Manager
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from flask_login import (
+    LoginManager, login_user, logout_user, login_required, current_user
+)
 from werkzeug.security import generate_password_hash, check_password_hash
 # Forms
-from forms import LoginForm, RegisterForm, ProductForm, CartForm, TransactionForm, ReviewForm
+from forms import (
+    LoginForm, RegisterForm, ProductForm, CartForm, TransactionForm, ReviewForm
+)
 # Database
-from models import db, User, Product, ProductReview, Order, Transaction, TransactionDetail, Category, ProductCategory
+from models import (
+    db, User, Product, ProductReview, Order, Transaction,
+    TransactionDetail, Category, ProductCategory
+)
 # Utilities
-from functools import wraps # Decorators
+from functools import wraps  # Decorators
 from datetime import datetime
-from dotenv import load_dotenv # Environment variables
-from os import getenv # Environment variables
-from locale import setlocale, currency, LC_ALL # Currency formatter
-import pandas as pd # Initialize Products
+from dotenv import load_dotenv  # Environment variables
+from os import getenv  # Environment variables
+from locale import setlocale, currency, LC_ALL  # Currency formatter
+import pandas as pd  # Initialize Products
 
 # Load Environment Variables
 load_dotenv()
@@ -30,10 +39,11 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 
 # Config Database URL
-if getenv('DATABASE_URL') == None:
+if getenv('DATABASE_URL') is None:
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///online-shop.db'
 else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = getenv('DATABASE_URL').replace("postgres", "postgresql")
+    database_url = getenv('DATABASE_URL').replace("postgres", "postgresql")
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize Database
@@ -50,7 +60,7 @@ def load_user(user_id):
 def admin_only(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if current_user.is_authenticated and current_user.id == 1 :
+        if current_user.is_authenticated and current_user.id == 1:
             return func(*args, **kwargs)
         return abort(403)
     return decorated_function
@@ -58,7 +68,7 @@ def admin_only(func):
 def member_only(func):
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        if current_user.is_authenticated and current_user.id != 1 :
+        if current_user.is_authenticated and current_user.id != 1:
             return func(*args, **kwargs)
         return abort(403)
     return decorated_function
@@ -66,7 +76,7 @@ def member_only(func):
 # // ------------------------------ TEMPLATE FILTERS ------------------------------ //
 
 @app.template_filter('format_currency')
-def format_currency(price:int):
+def format_currency(price: int):
     '''Format currency'''
     return currency(float(price))
 
@@ -76,14 +86,16 @@ def format_date(date):
     return date.strftime('%d/%m/%Y')
 
 @app.template_filter('refactor_categories')
-def refactor_categories(categories:list):
+def refactor_categories(categories: list):
     '''Change the categories into a more readable string format'''
     if len(categories) == 0:
         return 'Miscellaneous'
-    return ', '.join([pc.category.name.replace('And', ' & ') for pc in categories])
+    category_names = [pc.category.name.replace('And', ' & ')
+                      for pc in categories]
+    return ', '.join(category_names)
 
 @app.template_filter('get_stars')
-def get_stars(rating:int):
+def get_stars(rating: int):
     '''Convert Rating into stars'''
     return '★' * rating
 
@@ -92,7 +104,8 @@ def get_average_rating(reviews):
     '''Get average rating and convert them into stars'''
     if len(reviews) == 0:
         return 'Not Rated'
-    return '★' * (sum([review.rating for review in reviews]) // len(reviews))
+    average_rating = sum([review.rating for review in reviews]) // len(reviews)
+    return '★' * average_rating
 
 @app.template_filter('get_number_of_reviews')
 def get_number_of_reviews(reviews):
@@ -112,56 +125,68 @@ def get_products_count(details):
 @app.template_filter('get_current_sum')
 def get_current_sum(orders):
     '''Get Temporary Total Cost in Cart (from Order object)'''
-    return currency(float(sum([order.product.price * order.quantity for order in orders])))
+    total_cost = sum([order.product.price * order.quantity for order in orders])
+    return currency(float(total_cost))
 
 @app.template_filter('get_price_sum')
 def get_price_sum(transactions):
     '''Get Total Cost (from Transaction object)'''
-    return currency(float(sum([transaction.price * transaction.quantity for transaction in transactions])))
+    total_cost = sum([transaction.price * transaction.quantity
+                     for transaction in transactions])
+    return currency(float(total_cost))
 
 @app.template_filter('get_total_payment')
 def get_total_payment(info):
     '''Get Total Cost + Delivery Cost in currency format (from Transaction Object)'''
-    return currency(float(info.delivery_cost+sum([transaction.price * transaction.quantity for transaction in info.details])))
+    products_cost = sum([transaction.price * transaction.quantity
+                        for transaction in info.details])
+    total_cost = info.delivery_cost + products_cost
+    return currency(float(total_cost))
 
 # // ------------------------------ BASIC FUNCTIONALITY ------------------------------ //
 
 @app.route('/')
 @app.route('/<int:page>')
 def home(page=1):
-    products = Product.query.paginate(page,9)
-    return render_template('index.html', products = products)
+    products = Product.query.paginate(page, 9)
+    return render_template('index.html', products=products)
 
 @app.route('/category/<int:id>')
 @app.route('/category/<int:id>/<int:page>')
-def get_by_category(id:int, page=1):
-    products = Product.query.join(ProductCategory).filter_by(category_id=id).paginate(page,9)
-    return render_template('index.html', products= products)
+def get_by_category(id: int, page=1):
+    products = Product.query.join(ProductCategory).filter_by(
+        category_id=id
+    ).paginate(page, 9)
+    return render_template('index.html', products=products)
 
 @app.route('/search')
 @app.route('/search/<int:page>')
 def search_product(page=1):
     query = request.args.get('search')
-    products = Product.query.filter(Product.name.like(f'%{query}%')).paginate(page,9)
-    return render_template('index.html', products= products)
+    products = Product.query.filter(
+        Product.name.like(f'%{query}%')
+    ).paginate(page, 9)
+    return render_template('index.html', products=products)
 
 # // ------------------------------ USER AUTHENTICATION ------------------------------ //
 
-@app.route('/register', methods=['GET','POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegisterForm()
     if form.validate_on_submit():
-        find_user = User.query.filter_by(email=request.form.get('email')).first()
+        find_user = User.query.filter_by(
+            email=request.form.get('email')
+        ).first()
         if find_user is None:
             new_user = User(
-                name = request.form.get('name'),
-                email = request.form.get('email'),
-                password = generate_password_hash(
+                name=request.form.get('name'),
+                email=request.form.get('email'),
+                password=generate_password_hash(
                     request.form.get('password'),
                     method='pbkdf2:sha256',
                     salt_length=13,
                 ),
-                dob = datetime.strptime(request.form.get('dob'),'%Y-%m-%d'),
+                dob=datetime.strptime(request.form.get('dob'), '%Y-%m-%d'),
             )
             with app.app_context():
                 db.session.add(new_user)
@@ -171,16 +196,19 @@ def register():
         return redirect(url_for('login'))
     return render_template('auth.html', form=form, purpose='register')
 
-@app.route('/login', methods=['GET','POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
     if form.validate_on_submit():
         print("Login")
-        find_user = User.query.filter_by(email=request.form.get('email')).first()
+        find_user = User.query.filter_by(
+            email=request.form.get('email')
+        ).first()
         if find_user is None:
             flash("User doesn't exist! Please register!")
             return redirect(url_for('register'))
-        elif check_password_hash(find_user.password, request.form.get('password')):
+        elif check_password_hash(find_user.password,
+                               request.form.get('password')):
             login_user(find_user)
             return redirect(url_for('home'))
         else:
@@ -195,44 +223,46 @@ def logout():
 
 # // ------------------------------ PRODUCT MANAGEMENT (CRUD) ------------------------------ //
 
-@app.route('/products/add', methods=['GET','POST'])
+@app.route('/products/add', methods=['GET', 'POST'])
 @admin_only
 def add_product():
     form = ProductForm()
     if form.validate_on_submit():
-        find_product = Product.query.filter_by(name=request.form.get('name')).first()
+        find_product = Product.query.filter_by(
+            name=request.form.get('name')
+        ).first()
         if find_product is None:
             new_product = Product(
-                name = request.form.get('name'),
-                description = request.form.get('description'),
-                image_url = request.form.get('image_url'),
-                price = request.form.get('price'),
-                stock = request.form.get('stock'),
+                name=request.form.get('name'),
+                description=request.form.get('description'),
+                image_url=request.form.get('image_url'),
+                price=request.form.get('price'),
+                stock=request.form.get('stock'),
             )
             with app.app_context():
                 db.session.add(new_product)
                 db.session.commit()
                 for category in form.categories.data:
                     new_product_category = ProductCategory(
-                        product = new_product,
-                        category = Category.query.filter_by(name=category).first()
+                        product=new_product,
+                        category=Category.query.filter_by(name=category).first()
                     )
                 db.session.add(new_product_category)
                 db.session.commit()
             return redirect(url_for('home'))
-    return render_template('product_manager.html', purpose = 'add', form = form)
+    return render_template('product_manager.html', purpose='add', form=form)
 
 @app.route('/products/update/<int:id>', methods=['GET', 'POST'])
 @admin_only
-def update_product(id:int):
+def update_product(id: int):
     product = Product.query.filter_by(id=id).first()
     form = ProductForm(
-        name = product.name,
+        name=product.name,
         description=product.description,
         image_url=product.image_url,
-        price = product.price,
-        stock = product.stock,
-        categories = [category for category in product.categories]
+        price=product.price,
+        stock=product.stock,
+        categories=[category for category in product.categories]
     )
     if form.validate_on_submit():
         product.name = request.form.get('name')
@@ -247,30 +277,38 @@ def update_product(id:int):
                 db.session.commit()
             for category in form.categories.data:
                 new_product_category = ProductCategory(
-                    product = product,
-                    category = Category.query.filter_by(name=category).first()
+                    product=product,
+                    category=Category.query.filter_by(name=category).first()
                 )
                 db.session.add(new_product_category)
                 db.session.commit()
         return redirect(url_for('get_product', id=id))
-    return render_template('product_manager.html', product=product, purpose = 'update', form = form)
+    return render_template(
+        'product_manager.html',
+        product=product,
+        purpose='update',
+        form=form
+    )
 
 @app.route('/products/<int:id>', methods=['GET', 'POST'])
-def get_product(id:int):
+def get_product(id: int):
     product = Product.query.filter_by(id=id).first()
     cart_form = CartForm(product.stock)
     review_form = ReviewForm()
     if current_user.is_authenticated and review_form.validate_on_submit():
-        find_product_review = ProductReview.query.filter_by(product=product, user=current_user).first()
+        find_product_review = ProductReview.query.filter_by(
+            product=product,
+            user=current_user
+        ).first()
         if find_product_review:
             with app.app_context():
                 db.session.delete(find_product_review)
                 db.session.commit()
         new_product_review = ProductReview(
-            user = current_user,
-            product = product,
-            rating = int(request.form.get('rating')),
-            review = request.form.get('body')
+            user=current_user,
+            product=product,
+            rating=int(request.form.get('rating')),
+            review=request.form.get('body')
         )
         with app.app_context():
             db.session.add(new_product_review)
@@ -281,7 +319,7 @@ def get_product(id:int):
         cart_form=cart_form,
         review_form=review_form,
         product=product,
-        purpose = 'get'
+        purpose='get'
     )
 
 # // ------------------------------ CART FUNCTIONS ------------------------------ //
@@ -292,12 +330,12 @@ def add_to_cart(product_id, user_id):
     if int(request.form.get('count')) > product.stock:
         return redirect(url_for('home'))
     new_order = Order(
-        user= current_user,
-        product = product,
-        quantity = int(request.form.get('count'))
+        user=current_user,
+        product=product,
+        quantity=int(request.form.get('count'))
     )
     with app.app_context():
-        product.stock-=new_order.quantity
+        product.stock -= new_order.quantity
         db.session.add(new_order)
         db.session.commit()
     return redirect(url_for('home'))
@@ -309,7 +347,7 @@ def get_cart(user_id):
     orders = Order.query.filter_by(user=current_user)
     if user_id != current_user.id:
         return abort(403)
-    return render_template('cart.html', orders = orders)
+    return render_template('cart.html', orders=orders)
 
 @app.route('/cart/<int:user_id>/increment_quantity/<int:product_id>')
 @login_required
@@ -320,8 +358,8 @@ def increment_product_quantity(user_id, product_id):
     product = Product.query.filter_by(id=product_id).first()
     order = Order.query.filter_by(user_id=user_id, product_id=product_id).first()
     with app.app_context():
-        order.quantity+=1
-        product.stock-=1
+        order.quantity += 1
+        product.stock -= 1
         db.session.commit()
     return redirect(url_for('get_cart', user_id=user_id))
 
@@ -334,8 +372,8 @@ def decrement_product_quantity(user_id, product_id):
     product = Product.query.filter_by(id=product_id).first()
     order = Order.query.filter_by(user_id=user_id, product_id=product_id).first()
     with app.app_context():
-        order.quantity-=1
-        product.stock+=1
+        order.quantity -= 1
+        product.stock += 1
         if order.quantity == 0:
             db.session.delete(order)
         db.session.commit()
@@ -355,22 +393,22 @@ def checkout(user_id):
     if form.validate_on_submit():
         with app.app_context():
             new_transaction = Transaction(
-                user = current_user,
-                date = datetime.now().date(),
-                payment_method = request.form.get('payment_method'),
-                payment_status = 'Unpaid',
-                address = request.form.get('address'),
-                delivery_cost = len(request.form.get('address'))*100,
-                delivery_status = 'Unsent',
+                user=current_user,
+                date=datetime.now().date(),
+                payment_method=request.form.get('payment_method'),
+                payment_status='Unpaid',
+                address=request.form.get('address'),
+                delivery_cost=len(request.form.get('address')) * 100,
+                delivery_status='Unsent',
             )
             db.session.add(new_transaction)
             db.session.commit()
             for detail in details:
                 new_transaction_detail = TransactionDetail(
-                    transaction = new_transaction,
-                    product = detail.product,
-                    quantity = detail.quantity,
-                    price = detail.product.price
+                    transaction=new_transaction,
+                    product=detail.product,
+                    quantity=detail.quantity,
+                    price=detail.product.price
                 )
                 db.session.add(new_transaction_detail)
                 db.session.commit()
@@ -378,7 +416,11 @@ def checkout(user_id):
                 db.session.delete(detail)
                 db.session.commit()
             transaction_id = new_transaction.id
-        return redirect(url_for('get_transaction_history', user_id = user_id, transaction_id = transaction_id))
+        return redirect(url_for(
+            'get_transaction_history',
+            user_id=user_id,
+            transaction_id=transaction_id
+        ))
     return render_template('checkout.html', form=form, details=details)
 
 # // ------------------------------ TRANSACTION HISTORY ------------------------------ //
@@ -390,7 +432,11 @@ def get_all_transactions(user_id):
     if user_id != current_user.id:
         return abort(403)
     transactions = Transaction.query.filter_by(user_id=user_id)
-    return render_template('transaction.html', transactions = transactions, purpose='show_all')
+    return render_template(
+        'transaction.html',
+        transactions=transactions,
+        purpose='show_all'
+    )
 
 @app.route('/history/<int:user_id>/<int:transaction_id>', methods=['GET', 'POST'])
 @login_required
@@ -399,7 +445,11 @@ def get_transaction_history(user_id, transaction_id):
     if user_id != current_user.id:
         return abort(403)
     transaction = Transaction.query.filter_by(id=transaction_id).first()
-    return render_template('transaction.html', transaction = transaction, purpose='single')
+    return render_template(
+        'transaction.html',
+        transaction=transaction,
+        purpose='single'
+    )
 
 @app.route('/history/<int:user_id>/<int:transaction_id>/delivered', methods=['GET', 'POST'])
 @login_required
@@ -412,7 +462,11 @@ def product_delivered(user_id, transaction_id):
         transaction.delivery_status = 'Delivered'
         transaction.payment_status = 'Paid'
         db.session.commit()
-    return redirect(url_for('get_transaction_history', user_id=user_id, transaction_id=transaction_id))
+    return redirect(url_for(
+        'get_transaction_history',
+        user_id=user_id,
+        transaction_id=transaction_id
+    ))
 
 # // ------------------------------ DRIVER CODE ------------------------------ //
 
