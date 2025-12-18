@@ -20,7 +20,7 @@ from probabilistic_learning import CountingProbDist
 from utils import hashabledict
 
 
-# Улучшенная настройка логирования для второго коммита
+# Улучшенная настройка логирования для третьего коммита
 def setup_logging():
     """Настройка логирования с несколькими обработчиками"""
     logger = logging.getLogger(__name__)
@@ -393,75 +393,251 @@ class IRSystem:
 
     def index_collection(self, filenames):
         """Index a whole collection of files."""
+        logger.info(f"Индексация коллекции из {len(filenames)} файлов")
+
         prefix = os.path.dirname(__file__)
-        for filename in filenames:
-            self.index_document(open(filename).read(), os.path.relpath(filename, prefix))
+        for idx, filename in enumerate(filenames):
+            try:
+                logger.debug(f"Индексация файла {idx+1}/{len(filenames)}: {filename}")
+
+                if not os.path.exists(filename):
+                    logger.error(f"Файл не найден: {filename}")
+                    continue
+
+                with open(filename, 'r', encoding='utf-8') as file:
+                    content = file.read()
+
+                rel_path = os.path.relpath(filename, prefix)
+                self.index_document(content, rel_path)
+
+                logger.debug(f"Файл {filename} успешно проиндексирован")
+
+            except Exception as e:
+                logger.error(f"Ошибка при индексации файла {filename}: {e}", exc_info=True)
+
+        logger.info(f"Коллекция проиндексирована. Всего документов: {len(self.documents)}")
 
     def index_document(self, text, url):
         """Index the text of a document."""
-        # For now, use first line for title
-        title = text[:text.index('\n')].strip()
-        docwords = words(text)
-        docid = len(self.documents)
-        self.documents.append(Document(title, url, len(docwords)))
-        for word in docwords:
-            if word not in self.stopwords:
-                self.index[word][docid] += 1
+        logger.info(f"Индексация документа: {url}")
+
+        try:
+            # For now, use first line for title
+            if '\n' in text:
+                title = text[:text.index('\n')].strip()
+            else:
+                title = text[:100].strip() + "..." if len(text) > 100 else text.strip()
+                logger.warning(f"Документ {url} не содержит символов новой строки")
+
+            docwords = words(text)
+            docid = len(self.documents)
+
+            logger.debug(f"Документ {docid}: заголовок='{title}', количество слов={len(docwords)}")
+
+            self.documents.append(Document(title, url, len(docwords)))
+
+            indexed_words = 0
+            stopwords_count = 0
+
+            for word in docwords:
+                if word not in self.stopwords:
+                    self.index[word][docid] += 1
+                    indexed_words += 1
+                else:
+                    stopwords_count += 1
+
+            logger.info(f"Документ {docid} проиндексирован. "
+                       f"Индексировано слов: {indexed_words}, "
+                       f"стоп-слов: {stopwords_count}, "
+                       f"всего слов: {len(docwords)}")
+
+            # Логируем статистику по уникальным словам
+            unique_indexed_words = sum(1 for word in docwords if word not in self.stopwords)
+            logger.debug(f"Уникальных индексированных слов: {unique_indexed_words}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при индексации документа {url}: {e}", exc_info=True)
+            raise
 
     def query(self, query_text, n=10):
         """Return a list of n (score, docid) pairs for the best matches.
         Also handle the special syntax for 'learn: command'."""
+        logger.info(f"Выполнение запроса: '{query_text}' (n={n})")
+
         if query_text.startswith("learn:"):
-            doctext = os.popen(query_text[len("learn:"):], 'r').read()
-            self.index_document(doctext, query_text)
+            logger.info(f"Обнаружен специальный синтаксис 'learn:' в запросе")
+            command = query_text[len("learn:"):].strip()
+            logger.debug(f"Выполнение команды: {command}")
+
+            try:
+                doctext = os.popen(command, 'r').read()
+                logger.info(f"Команда выполнена успешно, получено {len(doctext)} символов")
+                self.index_document(doctext, query_text)
+                return []
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении команды '{command}': {e}")
+                return []
+
+        # Обработка обычного запроса
+        qwords = [w for w in words(query_text) if w not in self.stopwords]
+        logger.debug(f"Слова запроса после фильтрации стоп-слов: {qwords}")
+
+        if not qwords:
+            logger.warning("После фильтрации стоп-слов не осталось слов в запросе")
             return []
 
-        qwords = [w for w in words(query_text) if w not in self.stopwords]
-        shortest = min(qwords, key=lambda w: len(self.index[w]))
+        # Находим слово с наименьшим количеством документов для оптимизации
+        try:
+            shortest = min(qwords, key=lambda w: len(self.index[w]))
+            logger.debug(f"Слово с наименьшим количеством документов: '{shortest}' "
+                        f"(документов: {len(self.index[shortest])})")
+        except ValueError as e:
+            logger.error(f"Ошибка при поиске самого короткого слова: {e}")
+            return []
+
         docids = self.index[shortest]
-        return heapq.nlargest(n, ((self.total_score(qwords, docid), docid) for docid in docids))
+        logger.debug(f"Найдено {len(docids)} документов для слова '{shortest}'")
+
+        # Вычисляем скоринг для каждого документа
+        scored_docs = []
+        for docid in docids:
+            try:
+                score = self.total_score(qwords, docid)
+                scored_docs.append((score, docid))
+            except Exception as e:
+                logger.error(f"Ошибка при подсчете очков для документа {docid}: {e}")
+                continue
+
+        logger.info(f"Вычислены очки для {len(scored_docs)} документов")
+
+        # Возвращаем топ-n результатов
+        results = heapq.nlargest(n, scored_docs)
+        logger.info(f"Возвращено {len(results)} лучших результатов")
+
+        if results:
+            best_score, best_docid = results[0]
+            logger.debug(f"Лучший результат: документ {best_docid} с очками {best_score:.4f}")
+
+        return results
 
     def score(self, word, docid):
         """Compute a score for this word on the document with this docid."""
-        # There are many options; here we take a very simple approach
-        return np.log(1 + self.index[word][docid]) / np.log(1 + self.documents[docid].nwords)
+        try:
+            word_count = self.index[word][docid]
+            doc_nwords = self.documents[docid].nwords
+
+            if doc_nwords == 0:
+                logger.warning(f"Документ {docid} имеет 0 слов. Возвращаем 0.")
+                return 0.0
+
+            score = np.log(1 + word_count) / np.log(1 + doc_nwords)
+            logger.debug(f"Очки для слова '{word}' в документе {docid}: "
+                        f"count={word_count}, nwords={doc_nwords}, score={score:.4f}")
+            return score
+
+        except (KeyError, IndexError) as e:
+            logger.warning(f"Слово '{word}' не найдено в документе {docid}: {e}")
+            return 0.0
+        except Exception as e:
+            logger.error(f"Ошибка при вычислении очков для слова '{word}' в документе {docid}: {e}")
+            return 0.0
 
     def total_score(self, words, docid):
         """Compute the sum of the scores of these words on the document with this docid."""
-        return sum(self.score(word, docid) for word in words)
+        logger.debug(f"Вычисление суммарных очков для документа {docid}, слова: {words}")
+
+        total = 0.0
+        for word in words:
+            word_score = self.score(word, docid)
+            total += word_score
+            logger.debug(f"Слово '{word}': {word_score:.4f}, сумма: {total:.4f}")
+
+        logger.debug(f"Итоговые очки для документа {docid}: {total:.4f}")
+        return total
 
     def present(self, results):
         """Present the results as a list."""
-        for (score, docid) in results:
-            doc = self.documents[docid]
-            print("{:5.2}|{:25} | {}".format(100 * score, doc.url, doc.title[:45].expandtabs()))
+        logger.info(f"Отображение {len(results)} результатов")
+
+        if not results:
+            logger.warning("Нет результатов для отображения")
+            print("No results found.")
+            return
+
+        print(f"\n{'Score':<7} | {'URL':<25} | {'Title'}")
+        print("-" * 70)
+
+        for idx, (score, docid) in enumerate(results):
+            try:
+                doc = self.documents[docid]
+                score_percent = 100 * score
+                print(f"{score_percent:5.2f}% | {doc.url:<25} | {doc.title[:45].expandtabs()}")
+                logger.debug(f"Результат {idx+1}: docid={docid}, score={score:.4f}, "
+                           f"title='{doc.title[:30]}...'")
+            except IndexError as e:
+                logger.error(f"Ошибка при отображении результата {idx}: документ {docid} не найден")
+                print(f"{'ERROR':<7} | {'N/A':<25} | Document {docid} not found")
+            except Exception as e:
+                logger.error(f"Ошибка при отображении результата {idx}: {e}")
+                print(f"{'ERROR':<7} | {'N/A':<25} | Error displaying document")
 
     def present_results(self, query_text, n=10):
         """Get results for the query and present them."""
-        self.present(self.query(query_text, n))
+        logger.info(f"Выполнение и отображение результатов для запроса: '{query_text}'")
+
+        try:
+            results = self.query(query_text, n)
+            self.present(results)
+            logger.info("Результаты успешно отображены")
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении запроса '{query_text}': {e}", exc_info=True)
+            print(f"Error processing query: {e}")
 
 
 class UnixConsultant(IRSystem):
     """A trivial IR system over a small collection of Unix man pages."""
 
     def __init__(self):
+        logger.info("Создание UnixConsultant (специализированная IR система для man-страниц)")
+
         IRSystem.__init__(self, stopwords="how do i the a of")
 
         import os
         aima_root = os.path.dirname(__file__)
         mandir = os.path.join(aima_root, 'aima-data/MAN/')
-        man_files = [mandir + f for f in os.listdir(mandir) if f.endswith('.txt')]
 
-        self.index_collection(man_files)
+        logger.debug(f"Поиск man-страниц в директории: {mandir}")
+
+        try:
+            if not os.path.exists(mandir):
+                logger.error(f"Директория с man-страницами не найдена: {mandir}")
+                raise FileNotFoundError(f"Directory not found: {mandir}")
+
+            man_files = [os.path.join(mandir, f) for f in os.listdir(mandir) if f.endswith('.txt')]
+            logger.info(f"Найдено {len(man_files)} man-страниц в директории {mandir}")
+
+            if not man_files:
+                logger.warning("Не найдено ни одного файла с man-страницами")
+
+            self.index_collection(man_files)
+            logger.info(f"UnixConsultant создан успешно. Проиндексировано {len(self.documents)} документов")
+
+        except Exception as e:
+            logger.error(f"Ошибка при создании UnixConsultant: {e}", exc_info=True)
+            raise
 
 
 class Document:
     """Metadata for a document: title and url; maybe add others later."""
 
     def __init__(self, title, url, nwords):
+        logger.debug(f"Создание документа: title='{title[:30]}...', url={url}, nwords={nwords}")
         self.title = title
         self.url = url
         self.nwords = nwords
+
+    def __repr__(self):
+        return f"Document(title='{self.title[:20]}...', url='{self.url}', nwords={self.nwords})"
 
 
 def words(text, reg=re.compile('[a-z0-9]+')):
@@ -470,7 +646,13 @@ def words(text, reg=re.compile('[a-z0-9]+')):
     >>> words("``EGAD!'' Edgar cried.")
     ['egad', 'edgar', 'cried']
     """
-    return reg.findall(text.lower())
+    try:
+        result = reg.findall(text.lower())
+        logger.debug(f"Извлечено {len(result)} слов из текста (первые 5: {result[:5]})")
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении слов из текста: {e}")
+        return []
 
 
 def canonicalize(text):
@@ -478,7 +660,13 @@ def canonicalize(text):
     >>> canonicalize("``EGAD!'' Edgar cried.")
     'egad edgar cried'
     """
-    return ' '.join(words(text))
+    try:
+        result = ' '.join(words(text))
+        logger.debug(f"Канонизированный текст (первые 50 символов): '{result[:50]}...'")
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка при канонизации текста: {e}")
+        return ""
 
 
 # ______________________________________________________________________________
@@ -499,7 +687,10 @@ def shift_encode(plaintext, n):
     >>> shift_encode('abc z', 1)
     'bcd a'
     """
-    return encode(plaintext, alphabet[n:] + alphabet[:n])
+    logger.debug(f"Шифрование сдвигом (n={n}): '{plaintext[:20]}...'")
+    result = encode(plaintext, alphabet[n:] + alphabet[:n])
+    logger.debug(f"Результат шифрования: '{result[:20]}...'")
+    return result
 
 
 def rot13(plaintext):
@@ -509,31 +700,41 @@ def rot13(plaintext):
     >>> rot13(rot13('hello'))
     'hello'
     """
-    return shift_encode(plaintext, 13)
+    logger.debug(f"ROT13 шифрование: '{plaintext[:20]}...'")
+    result = shift_encode(plaintext, 13)
+    logger.debug(f"Результат ROT13: '{result[:20]}...'")
+    return result
 
 
 def translate(plaintext, function):
     """Translate chars of a plaintext with the given function."""
+    logger.debug(f"Перевод текста (длина={len(plaintext)})")
     result = ""
     for char in plaintext:
         result += function(char)
+    logger.debug(f"Перевод завершен. Результат: '{result[:20]}...'")
     return result
 
 
 def maketrans(from_, to_):
     """Create a translation table and return the proper function."""
+    logger.debug(f"Создание таблицы перевода: from_='{from_}', to_='{to_}'")
     trans_table = {}
     for n, char in enumerate(from_):
         trans_table[char] = to_[n]
 
+    logger.debug(f"Таблица перевода создана ({len(trans_table)} записей)")
     return lambda char: trans_table.get(char, char)
 
 
 def encode(plaintext, code):
     """Encode text using a code which is a permutation of the alphabet."""
+    logger.debug(f"Кодирование текста длиной {len(plaintext)} символов")
     trans = maketrans(alphabet + alphabet.upper(), code + code.upper())
 
-    return translate(plaintext, trans)
+    result = translate(plaintext, trans)
+    logger.debug(f"Текст закодирован. Результат: '{result[:20]}...'")
+    return result
 
 
 def bigrams(text):
@@ -543,7 +744,10 @@ def bigrams(text):
     >>> bigrams(['this', 'is', 'a', 'test'])
     [['this', 'is'], ['is', 'a'], ['a', 'test']]
     """
-    return [text[i:i + 2] for i in range(len(text) - 1)]
+    logger.debug(f"Создание биграмм из текста длиной {len(text)}")
+    result = [text[i:i + 2] for i in range(len(text) - 1)]
+    logger.debug(f"Создано {len(result)} биграмм. Первые 5: {result[:5]}")
+    return result
 
 
 # Decoding a Shift (or Caesar) Cipher
@@ -555,101 +759,60 @@ class ShiftDecoder:
     bigram probability distribution."""
 
     def __init__(self, training_text):
+        logger.info("Создание ShiftDecoder")
+        logger.debug(f"Длина тренировочного текста: {len(training_text)} символов")
+
         training_text = canonicalize(training_text)
+        logger.debug(f"Длина канонизированного текста: {len(training_text)} символов")
+
         self.P2 = CountingProbDist(bigrams(training_text), default=1)
+        logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
 
     def score(self, plaintext):
         """Return a score for text based on how common letters pairs are."""
+        logger.debug(f"Вычисление скоринга для текста: '{plaintext[:30]}...'")
 
         s = 1.0
-        for bi in bigrams(plaintext):
-            s = s * self.P2[bi]
+        bigram_list = bigrams(plaintext)
+        logger.debug(f"Анализ {len(bigram_list)} биграмм")
 
+        for bi in bigram_list:
+            try:
+                prob = self.P2[bi]
+                s = s * prob
+                logger.debug(f"Биграмма '{bi}': вероятность={prob}, текущий score={s}")
+            except Exception as e:
+                logger.warning(f"Ошибка при обработке биграммы '{bi}': {e}")
+                # Используем вероятность по умолчанию для продолжения
+                s = s * self.P2.default
+
+        logger.debug(f"Итоговый score: {s}")
         return s
 
     def decode(self, ciphertext):
         """Return the shift decoding of text with the best score."""
+        logger.info(f"Декодирование шифротекста: '{ciphertext[:30]}...'")
 
-        return max(all_shifts(ciphertext), key=lambda shift: self.score(shift))
+        if not ciphertext:
+            logger.warning("Пустой шифротекст передан для декодирования")
+            return ciphertext
 
+        try:
+            all_decodings = list(all_shifts(ciphertext))
+            logger.debug(f"Сгенерировано {len(all_decodings)} вариантов декодирования")
 
-def all_shifts(text):
-    """Return a list of all 26 possible encodings of text by a shift cipher."""
+            # Вычисляем скоринг для каждого варианта
+            scored_decodings = []
+            for i, decoding in enumerate(all_decodings):
+                score = self.score(decoding)
+                scored_decodings.append((score, decoding))
 
-    yield from (shift_encode(text, i) for i, _ in enumerate(alphabet))
+                if i % 5 == 0:  # Логируем каждые 5 вариантов
+                    logger.debug(f"Вариант {i}: score={score:.10f}, text='{decoding[:20]}...'")
 
+            # Выбираем лучший вариант
+            best_score, best_decoding = max(scored_decodings, key=lambda x: x[0])
+            logger.info(f"Найдено лучшее декодирование со score={best_score:.10f}")
+            logger.debug(f"Лучший результат: '{best_decoding[:50]}...'")
 
-# Decoding a General Permutation Cipher
-
-
-class PermutationDecoder:
-    """This is a much harder problem than the shift decoder. There are 26!
-    permutations, so we can't try them all. Instead we have to search.
-    We want to search well, but there are many things to consider:
-    Unigram probabilities (E is the most common letter); Bigram probabilities
-    (TH is the most common bigram); word probabilities (I and A are the most
-    common one-letter words, etc.); etc.
-    We could represent a search state as a permutation of the 26 letters,
-    and alter the solution through hill climbing. With an initial guess
-    based on unigram probabilities, this would probably fare well. However,
-    I chose instead to have an incremental representation. A state is
-    represented as a letter-to-letter map; for example {'z': 'e'} to
-    represent that 'z' will be translated to 'e'."""
-
-    def __init__(self, training_text, ciphertext=None):
-        self.Pwords = UnigramWordModel(words(training_text))
-        self.P1 = UnigramWordModel(training_text)  # By letter
-        self.P2 = NgramWordModel(2, words(training_text))  # By letter pair
-
-    def decode(self, ciphertext):
-        """Search for a decoding of the ciphertext."""
-        self.ciphertext = canonicalize(ciphertext)
-        # reduce domain to speed up search
-        self.chardomain = {c for c in self.ciphertext if c != ' '}
-        problem = PermutationDecoderProblem(decoder=self)
-        solution = search.best_first_graph_search(
-            problem, lambda node: self.score(node.state))
-
-        solution.state[' '] = ' '
-        return translate(self.ciphertext, lambda c: solution.state[c])
-
-    def score(self, code):
-        """Score is product of word scores, unigram scores, and bigram scores.
-        This can get very small, so we use logs and exp."""
-
-        # remake code dictionary to contain translation for all characters
-        full_code = code.copy()
-        full_code.update({x: x for x in self.chardomain if x not in code})
-        full_code[' '] = ' '
-        text = translate(self.ciphertext, lambda c: full_code[c])
-
-        # add small positive value to prevent computing log(0)
-        # TODO: Modify the values to make score more accurate
-        logP = (sum(np.log(self.Pwords[word] + 1e-20) for word in words(text)) +
-                sum(np.log(self.P1[c] + 1e-5) for c in text) +
-                sum(np.log(self.P2[b] + 1e-10) for b in bigrams(text)))
-        return -np.exp(logP)
-
-
-class PermutationDecoderProblem(search.Problem):
-
-    def __init__(self, initial=None, goal=None, decoder=None):
-        super().__init__(initial or hashabledict(), goal)
-        self.decoder = decoder
-
-    def actions(self, state):
-        search_list = [c for c in self.decoder.chardomain if c not in state]
-        target_list = [c for c in alphabet if c not in state.values()]
-        # Find the best character to replace
-        plain_char = max(search_list, key=lambda c: self.decoder.P1[c])
-        for cipher_char in target_list:
-            yield (plain_char, cipher_char)
-
-    def result(self, state, action):
-        new_state = hashabledict(state)  # copy to prevent hash issues
-        new_state[action[0]] = action[1]
-        return new_state
-
-    def goal_test(self, state):
-        """We're done when all letters in search domain are assigned."""
-        return len(state) >= len(self.decoder.chardomain)
+            return best_decoding
