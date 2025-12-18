@@ -12,14 +12,20 @@ import os
 import re
 import logging
 import logging.config
+import logging.handlers
 import json
 import time
 import traceback
 import sys
-from datetime import datetime
-from collections import defaultdict
+import inspect
+import threading
+import queue
+from datetime import datetime, timedelta
+from collections import defaultdict, deque
 from contextlib import contextmanager
-from functools import wraps
+from functools import wraps, lru_cache
+from typing import Optional, Dict, Any, List, Callable
+from pathlib import Path
 
 import numpy as np
 
@@ -29,11 +35,223 @@ from utils import hashabledict
 
 
 # =============================================================================
-# РАСШИРЕННАЯ КОНФИГУРАЦИЯ ЛОГИРОВАНИЯ ДЛЯ ПЯТОГО КОММИТА
+# ПРОДВИНУТАЯ КОНФИГУРАЦИЯ ЛОГИРОВАНИЯ ДЛЯ ШЕСТОГО КОММИТА
 # =============================================================================
 
-def load_logging_config(config_file='logging_config.json'):
-    """Загрузка конфигурации логирования из JSON файла"""
+class EnhancedJSONFormatter(logging.Formatter):
+    """Кастомный JSON форматтер для структурированного логирования"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Форматирование записи лога в JSON"""
+        log_object = {
+            'timestamp': self.formatTime(record, self.datefmt),
+            'level': record.levelname,
+            'logger': record.name,
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno,
+            'message': record.getMessage(),
+            'process': record.process,
+            'thread': record.thread,
+            'thread_name': record.threadName,
+        }
+
+        # Добавляем дополнительную информацию, если есть
+        if hasattr(record, 'extra'):
+            log_object.update(record.extra)
+
+        # Добавляем информацию об исключении, если есть
+        if record.exc_info:
+            log_object['exception'] = self.formatException(record.exc_info)
+
+        return json.dumps(log_object, ensure_ascii=False)
+
+
+class ColoredConsoleFormatter(logging.Formatter):
+    """Форматтер с цветами для консоли"""
+
+    COLORS = {
+        'DEBUG': '\033[36m',      # Cyan
+        'INFO': '\033[32m',       # Green
+        'WARNING': '\033[33m',    # Yellow
+        'ERROR': '\033[31m',      # Red
+        'CRITICAL': '\033[41m',   # Red background
+        'RESET': '\033[0m',       # Reset
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Форматирование с цветами"""
+        level_color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+        reset_color = self.COLORS['RESET']
+
+        # Форматируем базовое сообщение
+        message = super().format(record)
+
+        # Добавляем цвета
+        colored_message = f"{level_color}{message}{reset_color}"
+
+        return colored_message
+
+
+class LogBufferHandler(logging.Handler):
+    """Буферизация логов для пакетной обработки"""
+
+    def __init__(self, capacity: int = 1000, flush_interval: int = 60):
+        super().__init__()
+        self.buffer = deque(maxlen=capacity)
+        self.flush_interval = flush_interval
+        self.last_flush = time.time()
+        self.lock = threading.RLock()
+
+    def emit(self, record: logging.LogRecord):
+        """Добавление записи в буфер"""
+        with self.lock:
+            self.buffer.append(record)
+
+            # Автоматическая очистка по времени
+            current_time = time.time()
+            if current_time - self.last_flush >= self.flush_interval:
+                self.flush()
+                self.last_flush = current_time
+
+    def flush(self):
+        """Очистка буфера (может быть переопределена для отправки)"""
+        with self.lock:
+            if self.buffer:
+                buffer_copy = list(self.buffer)
+                self.buffer.clear()
+                # Здесь можно отправить логи куда-то (например, в базу данных или API)
+                # Для простоты просто очищаем
+                return buffer_copy
+        return []
+
+    def get_recent_logs(self, count: int = 100) -> List[logging.LogRecord]:
+        """Получение последних записей из буфера"""
+        with self.lock:
+            return list(self.buffer)[-count:]
+
+
+class DynamicLogLevelManager:
+    """Менеджер для динамического изменения уровней логирования"""
+
+    def __init__(self):
+        self.loggers: Dict[str, Dict[str, Any]] = {}
+        self.default_levels = {}
+        self.lock = threading.RLock()
+
+    def register_logger(self, logger: logging.Logger,
+                       default_level: str = 'INFO',
+                       description: str = ''):
+        """Регистрация логгера для управления"""
+        with self.lock:
+            self.loggers[logger.name] = {
+                'logger': logger,
+                'default_level': default_level,
+                'current_level': logger.level,
+                'description': description,
+                'handlers': list(logger.handlers)
+            }
+            self.default_levels[logger.name] = default_level
+
+    def set_level(self, logger_name: str, level: str):
+        """Установка уровня логирования для логгера"""
+        with self.lock:
+            if logger_name in self.loggers:
+                logger_info = self.loggers[logger_name]
+                level_num = getattr(logging, level.upper(), logging.INFO)
+                logger_info['logger'].setLevel(level_num)
+                logger_info['current_level'] = level_num
+                return True
+            return False
+
+    def reset_to_default(self, logger_name: str = None):
+        """Сброс уровня логирования к умолчанию"""
+        with self.lock:
+            if logger_name:
+                if logger_name in self.loggers:
+                    default_level = self.default_levels[logger_name]
+                    self.set_level(logger_name, default_level)
+            else:
+                for name in self.loggers:
+                    default_level = self.default_levels[name]
+                    self.set_level(name, default_level)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Получение статуса всех логгеров"""
+        with self.lock:
+            status = {}
+            for name, info in self.loggers.items():
+                status[name] = {
+                    'current_level': logging.getLevelName(info['current_level']),
+                    'default_level': info['default_level'],
+                    'description': info['description'],
+                    'handlers_count': len(info['handlers'])
+                }
+            return status
+
+
+class MetricsCollector:
+    """Сборщик метрик производительности и использования"""
+
+    def __init__(self):
+        self.metrics = defaultdict(lambda: defaultdict(float))
+        self.counters = defaultdict(int)
+        self.timestamps = defaultdict(list)
+        self.lock = threading.RLock()
+
+    def record_metric(self, metric_name: str, value: float,
+                     tags: Dict[str, str] = None):
+        """Запись метрики"""
+        with self.lock:
+            key = metric_name
+            if tags:
+                key = f"{metric_name}_{'_'.join(f'{k}={v}' for k, v in tags.items())}"
+
+            self.metrics[key]['sum'] += value
+            self.metrics[key]['count'] += 1
+            self.metrics[key]['min'] = min(self.metrics[key].get('min', float('inf')), value)
+            self.metrics[key]['max'] = max(self.metrics[key].get('max', -float('inf')), value)
+            self.metrics[key]['avg'] = self.metrics[key]['sum'] / self.metrics[key]['count']
+
+            # Храним временные метки для последних значений
+            self.timestamps[key].append((datetime.now(), value))
+            if len(self.timestamps[key]) > 1000:  # Ограничиваем размер
+                self.timestamps[key] = self.timestamps[key][-1000:]
+
+    def increment_counter(self, counter_name: str, amount: int = 1,
+                         tags: Dict[str, str] = None):
+        """Увеличение счетчика"""
+        with self.lock:
+            key = counter_name
+            if tags:
+                key = f"{counter_name}_{'_'.join(f'{k}={v}' for k, v in tags.items())}"
+            self.counters[key] += amount
+
+    def get_metrics_report(self) -> Dict[str, Any]:
+        """Получение отчета по метрикам"""
+        with self.lock:
+            report = {
+                'metrics': dict(self.metrics),
+                'counters': dict(self.counters),
+                'timestamp': datetime.now().isoformat()
+            }
+            return report
+
+    def clear(self):
+        """Очистка всех метрик"""
+        with self.lock:
+            self.metrics.clear()
+            self.counters.clear()
+            self.timestamps.clear()
+
+
+def setup_advanced_logging(config_file: str = 'logging_config.json'):
+    """Настройка продвинутого логирования"""
+
+    # Создаем директорию для логов, если ее нет
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
+
     default_config = {
         'version': 1,
         'disable_existing_loggers': False,
@@ -47,45 +265,76 @@ def load_logging_config(config_file='logging_config.json'):
                 'datefmt': '%H:%M:%S'
             },
             'json': {
-                'format': '{"timestamp": "%(asctime)s", "name": "%(name)s", "level": "%(levelname)s", "file": "%(filename)s", "line": %(lineno)d, "message": "%(message)s"}',
+                '()': '__main__.EnhancedJSONFormatter',
                 'datefmt': '%Y-%m-%d %H:%M:%S'
+            },
+            'colored': {
+                '()': '__main__.ColoredConsoleFormatter',
+                'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                'datefmt': '%H:%M:%S'
             }
         },
         'handlers': {
             'console': {
                 'class': 'logging.StreamHandler',
                 'level': 'INFO',
-                'formatter': 'simple',
+                'formatter': 'colored',
                 'stream': 'ext://sys.stdout'
             },
             'file': {
                 'class': 'logging.handlers.RotatingFileHandler',
                 'level': 'DEBUG',
                 'formatter': 'detailed',
-                'filename': 'text_processing.log',
-                'maxBytes': 10485760,
-                'backupCount': 5,
+                'filename': str(log_dir / 'text_processing.log'),
+                'maxBytes': 10485760,  # 10MB
+                'backupCount': 10,
                 'encoding': 'utf-8'
             },
             'error_file': {
                 'class': 'logging.FileHandler',
                 'level': 'WARNING',
                 'formatter': 'detailed',
-                'filename': 'text_processing_errors.log',
+                'filename': str(log_dir / 'errors.log'),
                 'encoding': 'utf-8'
             },
             'json_file': {
                 'class': 'logging.FileHandler',
                 'level': 'INFO',
                 'formatter': 'json',
-                'filename': 'text_processing_json.log',
+                'filename': str(log_dir / 'metrics.json.log'),
                 'encoding': 'utf-8'
+            },
+            'buffer_handler': {
+                '()': '__main__.LogBufferHandler',
+                'level': 'INFO',
+                'capacity': 5000,
+                'flush_interval': 30
             }
         },
         'loggers': {
             'text_processing': {
                 'level': 'DEBUG',
-                'handlers': ['console', 'file', 'error_file', 'json_file'],
+                'handlers': ['console', 'file', 'error_file', 'json_file', 'buffer_handler'],
+                'propagate': False
+            },
+            'text_processing.models': {
+                'level': 'INFO',
+                'handlers': ['console', 'file'],
+                'propagate': False
+            },
+            'text_processing.ir': {
+                'level': 'INFO',
+                'handlers': ['console', 'file'],
+                'propagate': False
+            },
+            'text_processing.decoders': {
+                'level': 'INFO',
+                'handlers': ['console', 'file'],
+                'propagate': False
+            },
+            'text_processing.metrics': {
+                'level': 'INFO',
+                'handlers': ['json_file'],
                 'propagate': False
             }
         },
@@ -96,121 +345,178 @@ def load_logging_config(config_file='logging_config.json'):
     }
 
     try:
-        if os.path.exists(config_file):
+        if Path(config_file).exists():
             with open(config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                logging.config.dictConfig(config)
-                logger = logging.getLogger('text_processing')
-                logger.info(f"Конфигурация логирования загружена из файла: {config_file}")
-                return logger
         else:
-            # Создаем файл конфигурации
+            config = default_config
             with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(default_config, f, indent=2)
-            logging.config.dictConfig(default_config)
-            logger = logging.getLogger('text_processing')
-            logger.info(f"Создан файл конфигурации по умолчанию: {config_file}")
-            return logger
+                json.dump(config, f, indent=2, ensure_ascii=False)
+
+        logging.config.dictConfig(config)
+
     except Exception as e:
-        # Если что-то пошло не так, используем базовую конфигурацию
+        # Резервная базовая конфигурация
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        logger = logging.getLogger('text_processing')
-        logger.warning(f"Не удалось загрузить конфигурацию из {config_file}: {e}. Используется базовая конфигурация.")
-        return logger
+
+    # Создаем и настраиваем основные логгеры
+    main_logger = logging.getLogger('text_processing')
+    main_logger.info(f"Продвинутая система логирования инициализирована. Логи в директории: {log_dir}")
+
+    # Инициализируем менеджер уровней логирования
+    level_manager = DynamicLogLevelManager()
+
+    # Инициализируем сборщик метрик
+    metrics_collector = MetricsCollector()
+
+    # Регистрируем метрики в отдельном логгере
+    metrics_logger = logging.getLogger('text_processing.metrics')
+
+    return main_logger, level_manager, metrics_collector, metrics_logger
 
 
-# Инициализируем логгер
-logger = load_logging_config()
-
-# Дополнительные утилиты логирования
-class PerformanceLogger:
-    """Класс для логирования производительности"""
-
-    def __init__(self, name="performance"):
-        self.logger = logging.getLogger(f"text_processing.{name}")
-        self.timers = {}
-        self.counters = {}
-
-    def start_timer(self, operation_name):
-        """Начать замер времени для операции"""
-        self.timers[operation_name] = time.time()
-        self.logger.debug(f"Таймер запущен для операции: {operation_name}")
-
-    def stop_timer(self, operation_name):
-        """Остановить таймер и залогировать время"""
-        if operation_name in self.timers:
-            elapsed = time.time() - self.timers[operation_name]
-            self.logger.info(f"Операция '{operation_name}' заняла {elapsed:.4f} секунд")
-            del self.timers[operation_name]
-            return elapsed
-        return 0.0
-
-    def increment_counter(self, counter_name, amount=1):
-        """Увеличить счетчик"""
-        if counter_name not in self.counters:
-            self.counters[counter_name] = 0
-        self.counters[counter_name] += amount
-        self.logger.debug(f"Счетчик '{counter_name}' увеличен на {amount}. Текущее значение: {self.counters[counter_name]}")
-
-    def get_counter(self, counter_name):
-        """Получить значение счетчика"""
-        return self.counters.get(counter_name, 0)
-
-    def log_metrics(self):
-        """Залогировать все метрики"""
-        if self.timers:
-            self.logger.warning(f"Активные таймеры: {list(self.timers.keys())}")
-
-        if self.counters:
-            metrics_str = ", ".join(f"{k}: {v}" for k, v in self.counters.items())
-            self.logger.info(f"Метрики: {metrics_str}")
-
-
-# Глобальный логгер производительности
-perf_logger = PerformanceLogger()
-
-
-@contextmanager
-def log_execution_time(operation_name):
-    """Контекстный менеджер для логирования времени выполнения"""
-    perf_logger.start_timer(operation_name)
-    try:
-        yield
-    finally:
-        perf_logger.stop_timer(operation_name)
-
-
-def log_exceptions(func):
-    """Декоратор для логирования исключений"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Исключение в функции {func.__name__}: {e}", exc_info=True)
-            raise
-    return wrapper
-
-
-def setup_module_logger(module_name):
-    """Настройка логгера для конкретного модуля"""
-    module_logger = logging.getLogger(f"text_processing.{module_name}")
-    return module_logger
-
-
-# Логгеры для разных компонентов системы
-models_logger = setup_module_logger("models")
-ir_logger = setup_module_logger("ir")
-decoders_logger = setup_module_logger("decoders")
-utils_logger = setup_module_logger("utils")
+# Глобальные объекты логирования
+logger, level_manager, metrics, metrics_logger = setup_advanced_logging()
 
 
 # =============================================================================
-# МОДЕЛИ ЯЗЫКА
+# ДЕКОРАТОРЫ И УТИЛИТЫ ДЛЯ ЛОГИРОВАНИЯ
+# =============================================================================
+
+def log_operation(name: str = None, level: str = 'INFO',
+                  log_args: bool = True, log_result: bool = False,
+                  measure_time: bool = True):
+    """Декоратор для логирования операций"""
+    def decorator(func):
+        op_name = name or func.__name__
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Определяем логгер для функции
+            func_logger = logging.getLogger(f"text_processing.{func.__module__}.{func.__name__}")
+
+            # Логируем начало операции
+            start_time = time.time() if measure_time else None
+
+            if log_args:
+                arg_str = ', '.join([str(arg) for arg in args])
+                kwarg_str = ', '.join([f'{k}={v}' for k, v in kwargs.items()])
+                all_args = ', '.join(filter(None, [arg_str, kwarg_str]))
+                func_logger.log(getattr(logging, level),
+                               f"Начало операции '{op_name}' с аргументами: {all_args}")
+            else:
+                func_logger.log(getattr(logging, level), f"Начало операции '{op_name}'")
+
+            try:
+                result = func(*args, **kwargs)
+
+                # Логируем результат
+                if log_result:
+                    result_str = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
+                    func_logger.log(getattr(logging, level),
+                                   f"Операция '{op_name}' завершена. Результат: {result_str}")
+                else:
+                    func_logger.log(getattr(logging, level), f"Операция '{op_name}' завершена")
+
+                # Логируем время выполнения
+                if measure_time and start_time:
+                    elapsed = time.time() - start_time
+                    func_logger.debug(f"Операция '{op_name}' заняла {elapsed:.4f} секунд")
+                    metrics.record_metric(f"operation.{op_name}.duration", elapsed)
+                    metrics.increment_counter(f"operation.{op_name}.calls")
+
+                    # Логируем метрики в отдельный логгер
+                    if elapsed > 1.0:  # Долгие операции
+                        metrics_logger.info(f"Долгая операция: {op_name} - {elapsed:.2f}с")
+
+                return result
+
+            except Exception as e:
+                func_logger.error(f"Ошибка в операции '{op_name}': {e}", exc_info=True)
+                metrics.increment_counter(f"operation.{op_name}.errors")
+                raise
+
+        return wrapper
+    return decorator
+
+
+@contextmanager
+def log_context(name: str, level: str = 'INFO', log_enter: bool = True,
+                log_exit: bool = True, measure_time: bool = True):
+    """Контекстный менеджер для логирования"""
+    context_logger = logging.getLogger(f"text_processing.context.{name}")
+
+    start_time = time.time() if measure_time else None
+
+    if log_enter:
+        context_logger.log(getattr(logging, level), f"Вход в контекст: {name}")
+
+    try:
+        yield context_logger
+    except Exception as e:
+        context_logger.error(f"Исключение в контексте '{name}': {e}", exc_info=True)
+        metrics.increment_counter(f"context.{name}.exceptions")
+        raise
+    finally:
+        if log_exit:
+            exit_message = f"Выход из контекста: {name}"
+
+            if measure_time and start_time:
+                elapsed = time.time() - start_time
+                exit_message += f" (заняло {elapsed:.4f} секунд)"
+                metrics.record_metric(f"context.{name}.duration", elapsed)
+
+            context_logger.log(getattr(logging, level), exit_message)
+
+
+class LoggingState:
+    """Класс для управления состоянием логирования"""
+
+    def __init__(self):
+        self.original_levels = {}
+        self.silenced_loggers = set()
+        self.backup_handlers = {}
+
+    def silence_logger(self, logger_name: str):
+        """Временное отключение логгера"""
+        logger_obj = logging.getLogger(logger_name)
+        if logger_name not in self.original_levels:
+            self.original_levels[logger_name] = logger_obj.level
+        logger_obj.setLevel(logging.CRITICAL + 1)  # Уровень выше максимального
+        self.silenced_loggers.add(logger_name)
+
+    def restore_logger(self, logger_name: str):
+        """Восстановление логгера"""
+        if logger_name in self.original_levels:
+            logger_obj = logging.getLogger(logger_name)
+            logger_obj.setLevel(self.original_levels[logger_name])
+            self.silenced_loggers.discard(logger_name)
+
+    def disable_handlers(self, logger_name: str):
+        """Отключение обработчиков логгера"""
+        logger_obj = logging.getLogger(logger_name)
+        if logger_name not in self.backup_handlers:
+            self.backup_handlers[logger_name] = logger_obj.handlers.copy()
+        logger_obj.handlers = []
+
+    def enable_handlers(self, logger_name: str):
+        """Включение обработчиков логгера"""
+        if logger_name in self.backup_handlers:
+            logger_obj = logging.getLogger(logger_name)
+            logger_obj.handlers = self.backup_handlers[logger_name]
+            del self.backup_handlers[logger_name]
+
+
+# Глобальное состояние логирования
+logging_state = LoggingState()
+
+
+# =============================================================================
+# МОДЕЛИ ЯЗЫКА С ПРОДВИНУТЫМ ЛОГИРОВАНИЕМ
 # =============================================================================
 
 class UnigramWordModel(CountingProbDist):
@@ -219,46 +525,55 @@ class UnigramWordModel(CountingProbDist):
     also generate a random text, n words long, with P.samples(n)."""
 
     def __init__(self, observations, default=0):
-        models_logger.info(f"Создание UnigramWordModel с {len(observations) if observations else 0} наблюдениями")
-        models_logger.debug(f"Параметр default: {default}")
+        with log_context("UnigramWordModel.__init__", log_enter=True, log_exit=True):
+            logger.info(f"Создание UnigramWordModel с {len(observations) if observations else 0} наблюдениями")
+            logger.debug(f"Параметр default: {default}")
 
-        with log_execution_time("UnigramWordModel.__init__"):
             # Call CountingProbDist constructor,
             # passing the observations and default parameters.
             super(UnigramWordModel, self).__init__(observations, default)
 
             unique_words = len(self) if hasattr(self, '__len__') else 'unknown'
-            models_logger.debug(f"UnigramWordModel создан успешно. Уникальных слов: {unique_words}")
+            logger.debug(f"UnigramWordModel создан успешно. Уникальных слов: {unique_words}")
 
-    @log_exceptions
+            # Регистрируем метрики
+            metrics.increment_counter("models.unigram.created")
+            if observations:
+                metrics.record_metric("models.unigram.observations", len(observations))
+
+    @log_operation("UnigramWordModel.samples", log_args=True, log_result=True)
     def samples(self, n):
         """Return a string of n words, random according to the model."""
-        models_logger.info(f"Генерация {n} слов с помощью UnigramWordModel")
-
         if n <= 0:
-            models_logger.warning(f"Запрошена генерация {n} слов. Возвращаем пустую строку.")
+            logger.warning(f"Запрошена генерация {n} слов. Возвращаем пустую строку.")
             return ''
 
-        with log_execution_time(f"UnigramWordModel.samples({n})"):
-            words = []
-            for i in range(n):
-                word = self.sample()
-                words.append(word)
-                if i % 20 == 0 and i > 0:  # Логируем каждые 20 слов
-                    models_logger.debug(f"Сгенерировано {i+1}/{n} слов")
+        words = []
+        for i in range(n):
+            word = self.sample()
+            words.append(word)
+            if i % 20 == 0 and i > 0:  # Логируем каждые 20 слов
+                logger.debug(f"Сгенерировано {i+1}/{n} слов")
 
-            result = ' '.join(words)
-            models_logger.debug(f"Сгенерировано {n} слов. Первые 5: {words[:5]}")
-            return result
+        result = ' '.join(words)
+        logger.debug(f"Сгенерировано {n} слов. Первые 5: {words[:5]}")
 
+        # Записываем метрики
+        metrics.increment_counter("models.unigram.samples_generated", n)
+
+        return result
+
+    @log_operation("UnigramWordModel.__getitem__", level='DEBUG', log_args=True, log_result=True)
     def __getitem__(self, word):
         """Override to add logging for probability queries"""
         try:
             prob = super().__getitem__(word)
-            models_logger.debug(f"Вероятность слова '{word}': {prob}")
+            logger.debug(f"Вероятность слова '{word}': {prob}")
+            metrics.increment_counter("models.unigram.probability_queries")
             return prob
         except KeyError as e:
-            models_logger.warning(f"Слово '{word}' не найдено в модели. Возвращаем вероятность по умолчанию.")
+            logger.warning(f"Слово '{word}' не найдено в модели. Возвращаем вероятность по умолчанию.")
+            metrics.increment_counter("models.unigram.misses")
             return self.default
 
 
@@ -268,15 +583,16 @@ class NgramWordModel(CountingProbDist):
     builds up an n-word sequence; P.add_cond_prob and P.add_sequence add data."""
 
     def __init__(self, n, observation_sequence=None, default=0):
-        if n <= 0:
-            models_logger.error(f"Попытка создать NgramWordModel с n={n}. n должно быть > 0.")
-            raise ValueError("n must be > 0")
+        with log_context("NgramWordModel.__init__"):
+            if n <= 0:
+                logger.error(f"Попытка создать NgramWordModel с n={n}. n должно быть > 0.")
+                metrics.increment_counter("models.ngram.creation_errors")
+                raise ValueError("n must be > 0")
 
-        models_logger.info(f"Создание NgramWordModel с n={n}")
-        if observation_sequence:
-            models_logger.debug(f"Начальная последовательность: {len(observation_sequence)} элементов")
+            logger.info(f"Создание NgramWordModel с n={n}")
+            if observation_sequence:
+                logger.debug(f"Начальная последовательность: {len(observation_sequence)} элементов")
 
-        with log_execution_time("NgramWordModel.__init__"):
             # In addition to the dictionary of n-tuples, cond_prob is a
             # mapping from (w1, ..., wn-1) to P(wn | w1, ... wn-1)
             CountingProbDist.__init__(self, default=default)
@@ -285,257 +601,271 @@ class NgramWordModel(CountingProbDist):
             self.add_sequence(observation_sequence or [])
 
             cond_prob_size = len(self.cond_prob)
-            models_logger.debug(f"NgramWordModel создан успешно. Условных распределений: {cond_prob_size}")
+            logger.debug(f"NgramWordModel создан успешно. Условных распределений: {cond_prob_size}")
 
+            # Регистрируем метрики
+            metrics.increment_counter("models.ngram.created", tags={'n': str(n)})
+
+    @log_operation("NgramWordModel.__getitem__", level='DEBUG')
     def __getitem__(self, ngram):
         """Override to add logging for ngram probability queries"""
         try:
             prob = super().__getitem__(ngram)
-            models_logger.debug(f"Вероятность n-граммы {ngram}: {prob}")
+            logger.debug(f"Вероятность n-граммы {ngram}: {prob}")
+            metrics.increment_counter("models.ngram.probability_queries")
             return prob
         except KeyError as e:
-            models_logger.debug(f"N-грамма {ngram} не найдена. Возвращаем вероятность по умолчанию: {self.default}")
+            logger.debug(f"N-грамма {ngram} не найдена. Возвращаем вероятность по умолчанию: {self.default}")
+            metrics.increment_counter("models.ngram.misses")
             return self.default
 
-    @log_exceptions
+    @log_operation("NgramWordModel.add_cond_prob", level='DEBUG')
     def add_cond_prob(self, ngram):
         """Build the conditional probabilities P(wn | (w1, ..., wn-1)"""
-        models_logger.debug(f"Добавление условной вероятности для n-граммы: {ngram}")
+        logger.debug(f"Добавление условной вероятности для n-граммы: {ngram}")
 
         if len(ngram) != self.n:
-            models_logger.error(f"Некорректная длина n-граммы: {len(ngram)} (ожидается {self.n})")
+            logger.error(f"Некорректная длина n-граммы: {len(ngram)} (ожидается {self.n})")
+            metrics.increment_counter("models.ngram.invalid_ngrams")
             raise ValueError(f"ngram must have length {self.n}")
 
         prefix = ngram[:-1]
         if prefix not in self.cond_prob:
-            models_logger.debug(f"Создание нового условного распределения для префикса: {prefix}")
+            logger.debug(f"Создание нового условного распределения для префикса: {prefix}")
             self.cond_prob[prefix] = CountingProbDist()
 
         self.cond_prob[prefix].add(ngram[-1])
-        models_logger.debug(f"Добавлено слово '{ngram[-1]}' для префикса {prefix}")
+        logger.debug(f"Добавлено слово '{ngram[-1]}' для префикса {prefix}")
 
-    @log_exceptions
+    @log_operation("NgramWordModel.add_sequence", log_args=True)
     def add_sequence(self, words):
         """Add each tuple words[i:i+n], using a sliding window."""
         n = self.n
 
         if len(words) < n:
-            models_logger.warning(f"Последовательность слишком короткая ({len(words)} слов) для n={n}")
+            logger.warning(f"Последовательность слишком короткая ({len(words)} слов) для n={n}")
+            metrics.increment_counter("models.ngram.short_sequences")
             return
 
-        models_logger.info(f"Добавление последовательности из {len(words)} слов в NgramWordModel (n={n})")
+        logger.info(f"Добавление последовательности из {len(words)} слов в NgramWordModel (n={n})")
 
-        with log_execution_time(f"NgramWordModel.add_sequence({len(words)})"):
-            ngram_count = 0
-            for i in range(len(words) - n + 1):
-                t = tuple(words[i:i + n])
-                self.add(t)
-                self.add_cond_prob(t)
-                ngram_count += 1
+        ngram_count = 0
+        for i in range(len(words) - n + 1):
+            t = tuple(words[i:i + n])
+            self.add(t)
+            self.add_cond_prob(t)
+            ngram_count += 1
 
-                if ngram_count % 100 == 0:  # Логируем каждые 100 n-грамм
-                    models_logger.debug(f"Обработано {ngram_count} n-грамм")
+            if ngram_count % 100 == 0:  # Логируем каждые 100 n-грамм
+                logger.debug(f"Обработано {ngram_count} n-грамм")
 
-            models_logger.info(f"Добавлено {ngram_count} n-грамм из {len(words)} слов")
-            perf_logger.increment_counter("ngrams_added", ngram_count)
+        logger.info(f"Добавлено {ngram_count} n-грамм из {len(words)} слов")
+        metrics.increment_counter("models.ngram.ngrams_added", ngram_count)
+        metrics.record_metric("models.ngram.sequence_length", len(words))
 
-    @log_exceptions
+    @log_operation("NgramWordModel.samples", log_args=True, log_result=True)
     def samples(self, nwords):
         """Generate an n-word sentence by picking random samples
         according to the model. At first pick a random n-gram and
         from then on keep picking a character according to
         P(c|wl-1, wl-2, ..., wl-n+1) where wl-1 ... wl-n+1 are the
         last n - 1 words in the generated sentence so far."""
-        models_logger.info(f"Генерация {nwords} слов с помощью NgramWordModel (n={self.n})")
+        logger.info(f"Генерация {nwords} слов с помощью NgramWordModel (n={self.n})")
 
         if nwords < self.n:
-            models_logger.warning(f"Запрошено {nwords} слов, но n={self.n}. Будет сгенерировано {self.n} слов.")
+            logger.warning(f"Запрошено {nwords} слов, но n={self.n}. Будет сгенерировано {self.n} слов.")
             nwords = self.n
 
-        with log_execution_time(f"NgramWordModel.samples({nwords})"):
-            n = self.n
-            output = list(self.sample())
-            models_logger.debug(f"Начальная n-грамма: {output}")
+        n = self.n
+        output = list(self.sample())
+        logger.debug(f"Начальная n-грамма: {output}")
 
-            for i in range(n, nwords):
-                last = output[-n + 1:]
-                prefix_tuple = tuple(last)
+        for i in range(n, nwords):
+            last = output[-n + 1:]
+            prefix_tuple = tuple(last)
 
-                if prefix_tuple not in self.cond_prob:
-                    models_logger.warning(f"Префикс {prefix_tuple} не найден в условных распределениях. Начинаем новое предложение.")
-                    output.extend(self.sample())
-                    continue
+            if prefix_tuple not in self.cond_prob:
+                logger.warning(f"Префикс {prefix_tuple} не найден в условных распределениях. Начинаем новое предложение.")
+                metrics.increment_counter("models.ngram.missing_prefixes")
+                output.extend(self.sample())
+                continue
 
-                next_word = self.cond_prob[prefix_tuple].sample()
-                output.append(next_word)
+            next_word = self.cond_prob[prefix_tuple].sample()
+            output.append(next_word)
 
-                if (i + 1) % 10 == 0:  # Логируем каждые 10 слов
-                    models_logger.debug(f"Сгенерировано {i+1}/{nwords} слов. Текущее слово: '{next_word}'")
+            if (i + 1) % 10 == 0:  # Логируем каждые 10 слов
+                logger.debug(f"Сгенерировано {i+1}/{nwords} слов. Текущее слово: '{next_word}'")
 
-            result = ' '.join(output)
-            models_logger.info(f"Генерация завершена. Получено {len(output)} слов")
-            models_logger.debug(f"Пример сгенерированного текста (первые 50 символов): {result[:50]}...")
-            perf_logger.increment_counter("words_generated", len(output))
-            return result
+        result = ' '.join(output)
+        logger.info(f"Генерация завершена. Получено {len(output)} слов")
+        logger.debug(f"Пример сгенерированного текста (первые 50 символов): {result[:50]}...")
+
+        # Записываем метрики
+        metrics.increment_counter("models.ngram.samples_generated", len(output))
+        metrics.record_metric("models.ngram.generated_length", len(output))
+
+        return result
 
 
 class NgramCharModel(NgramWordModel):
-    @log_exceptions
+    @log_operation("NgramCharModel.add_sequence", log_args=True)
     def add_sequence(self, words):
         """Add an empty space to every word to catch the beginning of words."""
-        models_logger.debug(f"Добавление последовательности в NgramCharModel: {len(words)} слов")
+        logger.debug(f"Добавление последовательности в NgramCharModel: {len(words)} слов")
 
         if not words:
-            models_logger.warning("Пустая последовательность слов передана в NgramCharModel")
+            logger.warning("Пустая последовательность слов передана в NgramCharModel")
             return
 
         total_chars = sum(len(word) + 1 for word in words)  # +1 для пробела
-        models_logger.debug(f"Общее количество символов для обработки: {total_chars}")
+        logger.debug(f"Общее количество символов для обработки: {total_chars}")
 
-        with log_execution_time(f"NgramCharModel.add_sequence({len(words)})"):
-            for word_idx, word in enumerate(words):
-                processed_word = ' ' + word
-                super().add_sequence(processed_word)
+        for word_idx, word in enumerate(words):
+            processed_word = ' ' + word
+            super().add_sequence(processed_word)
 
-                if word_idx % 50 == 0 and word_idx > 0:
-                    models_logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
+            if word_idx % 50 == 0 and word_idx > 0:
+                logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
 
 
 class UnigramCharModel(NgramCharModel):
     def __init__(self, observation_sequence=None, default=0):
-        models_logger.info("Создание UnigramCharModel")
-        with log_execution_time("UnigramCharModel.__init__"):
+        with log_context("UnigramCharModel.__init__"):
+            logger.info("Создание UnigramCharModel")
             CountingProbDist.__init__(self, default=default)
             self.n = 1
             self.cond_prob = defaultdict()
             self.add_sequence(observation_sequence or [])
 
             total_chars = len(self) if hasattr(self, '__len__') else 'unknown'
-            models_logger.debug(f"UnigramCharModel создан успешно. Уникальных символов: {total_chars}")
+            logger.debug(f"UnigramCharModel создан успешно. Уникальных символов: {total_chars}")
 
-    @log_exceptions
+            metrics.increment_counter("models.unigram_char.created")
+
+    @log_operation("UnigramCharModel.add_sequence", log_args=True)
     def add_sequence(self, words):
-        models_logger.info(f"Добавление последовательности в UnigramCharModel: {len(words)} слов")
+        logger.info(f"Добавление последовательности в UnigramCharModel: {len(words)} слов")
 
-        with log_execution_time(f"UnigramCharModel.add_sequence({len(words)})"):
-            char_count = 0
-            for word_idx, word in enumerate(words):
-                if not word:
-                    continue
+        char_count = 0
+        for word_idx, word in enumerate(words):
+            if not word:
+                continue
 
-                for char_idx, char in enumerate(word):
-                    self.add(char)
-                    char_count += 1
+            for char_idx, char in enumerate(word):
+                self.add(char)
+                char_count += 1
 
-                    if char_count % 1000 == 0:
-                        models_logger.debug(f"Обработано {char_count} символов")
+                if char_count % 1000 == 0:
+                    logger.debug(f"Обработано {char_count} символов")
 
-                if word_idx % 100 == 0 and word_idx > 0:
-                    models_logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
+            if word_idx % 100 == 0 and word_idx > 0:
+                logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
 
-            models_logger.info(f"Добавлено {char_count} символов из {len(words)} слов")
-            perf_logger.increment_counter("chars_processed", char_count)
+        logger.info(f"Добавлено {char_count} символов из {len(words)} слов")
+        metrics.increment_counter("models.unigram_char.chars_processed", char_count)
 
 
 # =============================================================================
-# АЛГОРИТМ ВИТЕРБИ
+# АЛГОРИТМ ВИТЕРБИ С ПРОДВИНУТЫМ ЛОГИРОВАНИЕМ
 # =============================================================================
 
-@log_exceptions
+@log_operation("viterbi_segment", log_args=True, log_result=True)
 def viterbi_segment(text, P):
     """Find the best segmentation of the string of characters, given the
     UnigramWordModel P."""
-    models_logger.info(f"Запуск алгоритма Витерби для текста длиной {len(text)} символов")
-    models_logger.debug(f"Текст: '{text[:50]}...' если длиннее 50 символов")
+    logger.info(f"Запуск алгоритма Витерби для текста длиной {len(text)} символов")
+    logger.debug(f"Текст: '{text[:50]}...' если длиннее 50 символов")
 
     if not text:
-        models_logger.warning("Пустой текст передан в viterbi_segment")
+        logger.warning("Пустой текст передан в viterbi_segment")
         return [], 0.0
 
-    with log_execution_time(f"viterbi_segment({len(text)})"):
-        # best[i] = best probability for text[0:i]
-        # words[i] = best word ending at position i
-        n = len(text)
-        words = [''] + list(text)
-        best = [1.0] + [0.0] * n
+    # best[i] = best probability for text[0:i]
+    # words[i] = best word ending at position i
+    n = len(text)
+    words = [''] + list(text)
+    best = [1.0] + [0.0] * n
 
-        models_logger.debug(f"Инициализирован массив best размером {len(best)}")
-        models_logger.debug(f"Используется модель P: {type(P).__name__}")
+    logger.debug(f"Инициализирован массив best размером {len(best)}")
+    logger.debug(f"Используется модель P: {type(P).__name__}")
 
-        # Fill in the vectors best words via dynamic programming
-        progress_interval = max(1, n // 10)  # Логируем каждые 10%
-        for i in range(1, n + 1):
-            if i % progress_interval == 0:
-                models_logger.debug(f"Обработано {i}/{n} позиций ({i/n*100:.1f}%)")
+    # Fill in the vectors best words via dynamic programming
+    progress_interval = max(1, n // 10)  # Логируем каждые 10%
+    for i in range(1, n + 1):
+        if i % progress_interval == 0:
+            logger.debug(f"Обработано {i}/{n} позиций ({i/n*100:.1f}%)")
 
-            best_candidate = None
-            best_prob = 0.0
+        best_candidate = None
+        best_prob = 0.0
 
-            for j in range(0, i):
-                w = text[j:i]
-                if not w:
-                    continue
+        for j in range(0, i):
+            w = text[j:i]
+            if not w:
+                continue
 
-                try:
-                    word_prob = P[w]
-                    curr_score = word_prob * best[j]
+            try:
+                word_prob = P[w]
+                curr_score = word_prob * best[j]
 
-                    if curr_score > best_prob:
-                        best_prob = curr_score
-                        best_candidate = w
+                if curr_score > best_prob:
+                    best_prob = curr_score
+                    best_candidate = w
 
-                except Exception as e:
-                    models_logger.error(f"Ошибка при обработке слова '{w}': {e}")
-                    continue
+            except Exception as e:
+                logger.error(f"Ошибка при обработке слова '{w}': {e}")
+                continue
 
-            if best_candidate:
-                best[i] = best_prob
-                words[i] = best_candidate
-                models_logger.debug(f"Позиция {i}: лучшее слово '{best_candidate}' с вероятностью {best_prob:.6f}")
-            else:
-                models_logger.warning(f"Не найдено подходящее слово для позиции {i}")
-                best[i] = 0.0
-                words[i] = ''
+        if best_candidate:
+            best[i] = best_prob
+            words[i] = best_candidate
+            logger.debug(f"Позиция {i}: лучшее слово '{best_candidate}' с вероятностью {best_prob:.6f}")
+        else:
+            logger.warning(f"Не найдено подходящее слово для позиции {i}")
+            best[i] = 0.0
+            words[i] = ''
 
-        models_logger.debug("Динамическое программирование завершено")
+    logger.debug("Динамическое программирование завершено")
 
-        # Now recover the sequence of best words
-        sequence = []
-        i = len(words) - 1
-        step_count = 0
+    # Now recover the sequence of best words
+    sequence = []
+    i = len(words) - 1
+    step_count = 0
 
-        while i > 0:
-            if step_count > n:  # Защита от бесконечного цикла
-                models_logger.error(f"Превышено максимальное количество шагов ({n}) при восстановлении последовательности")
-                break
+    while i > 0:
+        if step_count > n:  # Защита от бесконечного цикла
+            logger.error(f"Превышено максимальное количество шагов ({n}) при восстановлении последовательности")
+            break
 
-            current_word = words[i]
-            if not current_word:
-                models_logger.error(f"Пустое слово на позиции {i}. Прерывание восстановления.")
-                break
+        current_word = words[i]
+        if not current_word:
+            logger.error(f"Пустое слово на позиции {i}. Прерывание восстановления.")
+            break
 
-            sequence.insert(0, current_word)
-            i = i - len(current_word)
-            step_count += 1
+        sequence.insert(0, current_word)
+        i = i - len(current_word)
+        step_count += 1
 
-            models_logger.debug(f"Шаг {step_count}: слово '{current_word}', переходим к позиции {i}")
+        logger.debug(f"Шаг {step_count}: слово '{current_word}', переходим к позиции {i}")
 
-        final_prob = best[-1]
-        models_logger.info(f"Алгоритм Витерби завершен. Найдено {len(sequence)} слов с вероятностью {final_prob:.10f}")
-        models_logger.debug(f"Результат сегментации: {' '.join(sequence)}")
+    final_prob = best[-1]
+    logger.info(f"Алгоритм Витерби завершен. Найдено {len(sequence)} слов с вероятностью {final_prob:.10f}")
+    logger.debug(f"Результат сегментации: {' '.join(sequence)}")
 
-        if final_prob == 0.0:
-            models_logger.warning("Итоговая вероятность равна 0. Возможно, текст не может быть корректно сегментирован.")
+    if final_prob == 0.0:
+        logger.warning("Итоговая вероятность равна 0. Возможно, текст не может быть корректно сегментирован.")
 
-        perf_logger.increment_counter("viterbi_segmentations")
-        perf_logger.increment_counter("viterbi_words_segmented", len(sequence))
+    # Записываем метрики
+    metrics.increment_counter("algorithms.viterbi.segmentations")
+    metrics.increment_counter("algorithms.viterbi.words_segmented", len(sequence))
+    metrics.record_metric("algorithms.viterbi.text_length", n)
+    metrics.record_metric("algorithms.viterbi.final_probability", final_prob)
 
-        # Return sequence of best words and overall probability
-        return sequence, final_prob
+    # Return sequence of best words and overall probability
+    return sequence, final_prob
 
 
 # =============================================================================
-# ИНФОРМАЦИОННО-ПОИСКОВАЯ СИСТЕМА
+# ИНФОРМАЦИОННО-ПОИСКОВАЯ СИСТЕМА С ПРОДВИНУТЫМ ЛОГИРОВАНИЕМ
 # =============================================================================
 
 
@@ -551,160 +881,165 @@ class IRSystem:
 
     def __init__(self, stopwords='the a of'):
         """Create an IR System. Optionally specify stopwords."""
-        ir_logger.info(f"Создание IRSystem со стоп-словами: {stopwords}")
+        with log_context("IRSystem.__init__"):
+            logger.info(f"Создание IRSystem со стоп-словами: {stopwords}")
 
-        with log_execution_time("IRSystem.__init__"):
             # index is a map of {word: {docid: count}}, where docid is an int,
             # indicating the index into the documents list.
             self.index = defaultdict(lambda: defaultdict(int))
             self.stopwords = set(words(stopwords))
             self.documents = []
 
-            ir_logger.debug(f"Инициализирован индекс. Стоп-слов: {len(self.stopwords)}")
-            ir_logger.debug(f"Стоп-слова: {sorted(self.stopwords)}")
+            logger.debug(f"Инициализирован индекс. Стоп-слов: {len(self.stopwords)}")
+            logger.debug(f"Стоп-слова: {sorted(self.stopwords)}")
 
-    @log_exceptions
+            metrics.increment_counter("ir.system.created")
+
+    @log_operation("IRSystem.index_collection", log_args=True)
     def index_collection(self, filenames):
         """Index a whole collection of files."""
-        ir_logger.info(f"Индексация коллекции из {len(filenames)} файлов")
+        logger.info(f"Индексация коллекции из {len(filenames)} файлов")
 
-        with log_execution_time(f"IRSystem.index_collection({len(filenames)})"):
-            prefix = os.path.dirname(__file__)
-            for idx, filename in enumerate(filenames):
-                try:
-                    ir_logger.debug(f"Индексация файла {idx+1}/{len(filenames)}: {filename}")
-
-                    if not os.path.exists(filename):
-                        ir_logger.error(f"Файл не найден: {filename}")
-                        continue
-
-                    with open(filename, 'r', encoding='utf-8') as file:
-                        content = file.read()
-
-                    rel_path = os.path.relpath(filename, prefix)
-                    self.index_document(content, rel_path)
-
-                    ir_logger.debug(f"Файл {filename} успешно проиндексирован")
-
-                except Exception as e:
-                    ir_logger.error(f"Ошибка при индексации файла {filename}: {e}", exc_info=True)
-
-            ir_logger.info(f"Коллекция проиндексирована. Всего документов: {len(self.documents)}")
-            perf_logger.increment_counter("documents_indexed", len(filenames))
-
-    @log_exceptions
-    def index_document(self, text, url):
-        """Index the text of a document."""
-        ir_logger.info(f"Индексация документа: {url}")
-
-        with log_execution_time(f"IRSystem.index_document({len(text)} chars)"):
+        prefix = os.path.dirname(__file__)
+        for idx, filename in enumerate(filenames):
             try:
-                # For now, use first line for title
-                if '\n' in text:
-                    title = text[:text.index('\n')].strip()
-                else:
-                    title = text[:100].strip() + "..." if len(text) > 100 else text.strip()
-                    ir_logger.warning(f"Документ {url} не содержит символов новой строки")
+                logger.debug(f"Индексация файла {idx+1}/{len(filenames)}: {filename}")
 
-                docwords = words(text)
-                docid = len(self.documents)
+                if not os.path.exists(filename):
+                    logger.error(f"Файл не найден: {filename}")
+                    continue
 
-                ir_logger.debug(f"Документ {docid}: заголовок='{title}', количество слов={len(docwords)}")
+                with open(filename, 'r', encoding='utf-8') as file:
+                    content = file.read()
 
-                self.documents.append(Document(title, url, len(docwords)))
+                rel_path = os.path.relpath(filename, prefix)
+                self.index_document(content, rel_path)
 
-                indexed_words = 0
-                stopwords_count = 0
-
-                for word in docwords:
-                    if word not in self.stopwords:
-                        self.index[word][docid] += 1
-                        indexed_words += 1
-                    else:
-                        stopwords_count += 1
-
-                ir_logger.info(f"Документ {docid} проиндексирован. "
-                            f"Индексировано слов: {indexed_words}, "
-                            f"стоп-слов: {stopwords_count}, "
-                            f"всего слов: {len(docwords)}")
-
-                # Логируем статистику по уникальным словам
-                unique_indexed_words = sum(1 for word in docwords if word not in self.stopwords)
-                ir_logger.debug(f"Уникальных индексированных слов: {unique_indexed_words}")
-
-                perf_logger.increment_counter("words_indexed", indexed_words)
+                logger.debug(f"Файл {filename} успешно проиндексирован")
 
             except Exception as e:
-                ir_logger.error(f"Ошибка при индексации документа {url}: {e}", exc_info=True)
-                raise
+                logger.error(f"Ошибка при индексации файла {filename}: {e}", exc_info=True)
 
-    @log_exceptions
+        logger.info(f"Коллекция проиндексирована. Всего документов: {len(self.documents)}")
+        metrics.increment_counter("ir.collections.indexed", len(filenames))
+
+    @log_operation("IRSystem.index_document", log_args=True)
+    def index_document(self, text, url):
+        """Index the text of a document."""
+        logger.info(f"Индексация документа: {url}")
+
+        try:
+            # For now, use first line for title
+            if '\n' in text:
+                title = text[:text.index('\n')].strip()
+            else:
+                title = text[:100].strip() + "..." if len(text) > 100 else text.strip()
+                logger.warning(f"Документ {url} не содержит символов новой строки")
+
+            docwords = words(text)
+            docid = len(self.documents)
+
+            logger.debug(f"Документ {docid}: заголовок='{title}', количество слов={len(docwords)}")
+
+            self.documents.append(Document(title, url, len(docwords)))
+
+            indexed_words = 0
+            stopwords_count = 0
+
+            for word in docwords:
+                if word not in self.stopwords:
+                    self.index[word][docid] += 1
+                    indexed_words += 1
+                else:
+                    stopwords_count += 1
+
+            logger.info(f"Документ {docid} проиндексирован. "
+                       f"Индексировано слов: {indexed_words}, "
+                       f"стоп-слов: {stopwords_count}, "
+                       f"всего слов: {len(docwords)}")
+
+            # Логируем статистику по уникальным словам
+            unique_indexed_words = sum(1 for word in docwords if word not in self.stopwords)
+            logger.debug(f"Уникальных индексированных слов: {unique_indexed_words}")
+
+            # Записываем метрики
+            metrics.increment_counter("ir.documents.indexed")
+            metrics.increment_counter("ir.words.indexed", indexed_words)
+            metrics.record_metric("ir.document.words", len(docwords))
+
+        except Exception as e:
+            logger.error(f"Ошибка при индексации документа {url}: {e}", exc_info=True)
+            metrics.increment_counter("ir.indexing.errors")
+            raise
+
+    @log_operation("IRSystem.query", log_args=True, log_result=True)
     def query(self, query_text, n=10):
         """Return a list of n (score, docid) pairs for the best matches.
         Also handle the special syntax for 'learn: command'."""
-        ir_logger.info(f"Выполнение запроса: '{query_text}' (n={n})")
+        logger.info(f"Выполнение запроса: '{query_text}' (n={n})")
 
-        with log_execution_time(f"IRSystem.query('{query_text[:20]}...')"):
-            if query_text.startswith("learn:"):
-                ir_logger.info(f"Обнаружен специальный синтаксис 'learn:' в запросе")
-                command = query_text[len("learn:"):].strip()
-                ir_logger.debug(f"Выполнение команды: {command}")
+        if query_text.startswith("learn:"):
+            logger.info(f"Обнаружен специальный синтаксис 'learn:' в запросе")
+            command = query_text[len("learn:"):].strip()
+            logger.debug(f"Выполнение команды: {command}")
 
-                try:
-                    doctext = os.popen(command, 'r').read()
-                    ir_logger.info(f"Команда выполнена успешно, получено {len(doctext)} символов")
-                    self.index_document(doctext, query_text)
-                    return []
-                except Exception as e:
-                    ir_logger.error(f"Ошибка при выполнении команды '{command}': {e}")
-                    return []
-
-            # Обработка обычного запроса
-            qwords = [w for w in words(query_text) if w not in self.stopwords]
-            ir_logger.debug(f"Слова запроса после фильтрации стоп-слов: {qwords}")
-
-            if not qwords:
-                ir_logger.warning("После фильтрации стоп-слов не осталось слов в запросе")
-                return []
-
-            # Находим слово с наименьшим количеством документов для оптимизации
             try:
-                shortest = min(qwords, key=lambda w: len(self.index[w]))
-                ir_logger.debug(f"Слово с наименьшим количеством документов: '{shortest}' "
-                            f"(документов: {len(self.index[shortest])})")
-            except ValueError as e:
-                ir_logger.error(f"Ошибка при поиске самого короткого слова: {e}")
+                doctext = os.popen(command, 'r').read()
+                logger.info(f"Команда выполнена успешно, получено {len(doctext)} символов")
+                self.index_document(doctext, query_text)
+                return []
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении команды '{command}': {e}")
                 return []
 
-            docids = self.index[shortest]
-            ir_logger.debug(f"Найдено {len(docids)} документов для слова '{shortest}'")
+        # Обработка обычного запроса
+        qwords = [w for w in words(query_text) if w not in self.stopwords]
+        logger.debug(f"Слова запроса после фильтрации стоп-слов: {qwords}")
 
-            # Вычисляем скоринг для каждого документа
-            scored_docs = []
-            for docid in docids:
-                try:
-                    score = self.total_score(qwords, docid)
-                    scored_docs.append((score, docid))
-                except Exception as e:
-                    ir_logger.error(f"Ошибка при подсчете очков для документа {docid}: {e}")
-                    continue
+        if not qwords:
+            logger.warning("После фильтрации стоп-слов не осталось слов в запросе")
+            return []
 
-            ir_logger.info(f"Вычислены очки для {len(scored_docs)} документов")
+        # Находим слово с наименьшим количеством документов для оптимизации
+        try:
+            shortest = min(qwords, key=lambda w: len(self.index[w]))
+            logger.debug(f"Слово с наименьшим количеством документов: '{shortest}' "
+                        f"(документов: {len(self.index[shortest])})")
+        except ValueError as e:
+            logger.error(f"Ошибка при поиске самого короткого слова: {e}")
+            return []
 
-            # Возвращаем топ-n результатов
-            results = heapq.nlargest(n, scored_docs)
-            ir_logger.info(f"Возвращено {len(results)} лучших результатов")
+        docids = self.index[shortest]
+        logger.debug(f"Найдено {len(docids)} документов для слова '{shortest}'")
 
-            if results:
-                best_score, best_docid = results[0]
-                ir_logger.debug(f"Лучший результат: документ {best_docid} с очками {best_score:.4f}")
+        # Вычисляем скоринг для каждого документа
+        scored_docs = []
+        for docid in docids:
+            try:
+                score = self.total_score(qwords, docid)
+                scored_docs.append((score, docid))
+            except Exception as e:
+                logger.error(f"Ошибка при подсчете очков для документа {docid}: {e}")
+                continue
 
-            perf_logger.increment_counter("queries_executed")
-            perf_logger.increment_counter("documents_scored", len(scored_docs))
+        logger.info(f"Вычислены очки для {len(scored_docs)} документов")
 
-            return results
+        # Возвращаем топ-n результатов
+        results = heapq.nlargest(n, scored_docs)
+        logger.info(f"Возвращено {len(results)} лучших результатов")
 
-    @log_exceptions
+        if results:
+            best_score, best_docid = results[0]
+            logger.debug(f"Лучший результат: документ {best_docid} с очками {best_score:.4f}")
+
+        # Записываем метрики
+        metrics.increment_counter("ir.queries.executed")
+        metrics.increment_counter("ir.documents.scored", len(scored_docs))
+        metrics.record_metric("ir.query.words_count", len(qwords))
+
+        return results
+
+    @log_operation("IRSystem.score", level='DEBUG')
     def score(self, word, docid):
         """Compute a score for this word on the document with this docid."""
         try:
@@ -712,42 +1047,42 @@ class IRSystem:
             doc_nwords = self.documents[docid].nwords
 
             if doc_nwords == 0:
-                ir_logger.warning(f"Документ {docid} имеет 0 слов. Возвращаем 0.")
+                logger.warning(f"Документ {docid} имеет 0 слов. Возвращаем 0.")
                 return 0.0
 
             score = np.log(1 + word_count) / np.log(1 + doc_nwords)
-            ir_logger.debug(f"Очки для слова '{word}' в документе {docid}: "
+            logger.debug(f"Очки для слова '{word}' в документе {docid}: "
                         f"count={word_count}, nwords={doc_nwords}, score={score:.4f}")
             return score
 
         except (KeyError, IndexError) as e:
-            ir_logger.warning(f"Слово '{word}' не найдено в документе {docid}: {e}")
+            logger.warning(f"Слово '{word}' не найдено в документе {docid}: {e}")
             return 0.0
         except Exception as e:
-            ir_logger.error(f"Ошибка при вычислении очков для слова '{word}' в документе {docid}: {e}")
+            logger.error(f"Ошибка при вычислении очков для слова '{word}' в документе {docid}: {e}")
             return 0.0
 
-    @log_exceptions
+    @log_operation("IRSystem.total_score", level='DEBUG')
     def total_score(self, words, docid):
         """Compute the sum of the scores of these words on the document with this docid."""
-        ir_logger.debug(f"Вычисление суммарных очков для документа {docid}, слова: {words}")
+        logger.debug(f"Вычисление суммарных очков для документа {docid}, слова: {words}")
 
         total = 0.0
         for word in words:
             word_score = self.score(word, docid)
             total += word_score
-            ir_logger.debug(f"Слово '{word}': {word_score:.4f}, сумма: {total:.4f}")
+            logger.debug(f"Слово '{word}': {word_score:.4f}, сумма: {total:.4f}")
 
-        ir_logger.debug(f"Итоговые очки для документа {docid}: {total:.4f}")
+        logger.debug(f"Итоговые очки для документа {docid}: {total:.4f}")
         return total
 
-    @log_exceptions
+    @log_operation("IRSystem.present", log_args=True)
     def present(self, results):
         """Present the results as a list."""
-        ir_logger.info(f"Отображение {len(results)} результатов")
+        logger.info(f"Отображение {len(results)} результатов")
 
         if not results:
-            ir_logger.warning("Нет результатов для отображения")
+            logger.warning("Нет результатов для отображения")
             print("No results found.")
             return
 
@@ -759,26 +1094,26 @@ class IRSystem:
                 doc = self.documents[docid]
                 score_percent = 100 * score
                 print(f"{score_percent:5.2f}% | {doc.url:<25} | {doc.title[:45].expandtabs()}")
-                ir_logger.debug(f"Результат {idx+1}: docid={docid}, score={score:.4f}, "
-                            f"title='{doc.title[:30]}...'")
+                logger.debug(f"Результат {idx+1}: docid={docid}, score={score:.4f}, "
+                           f"title='{doc.title[:30]}...'")
             except IndexError as e:
-                ir_logger.error(f"Ошибка при отображении результата {idx}: документ {docid} не найден")
+                logger.error(f"Ошибка при отображении результата {idx}: документ {docid} не найден")
                 print(f"{'ERROR':<7} | {'N/A':<25} | Document {docid} not found")
             except Exception as e:
-                ir_logger.error(f"Ошибка при отображении результата {idx}: {e}")
+                logger.error(f"Ошибка при отображении результата {idx}: {e}")
                 print(f"{'ERROR':<7} | {'N/A':<25} | Error displaying document")
 
-    @log_exceptions
+    @log_operation("IRSystem.present_results", log_args=True)
     def present_results(self, query_text, n=10):
         """Get results for the query and present them."""
-        ir_logger.info(f"Выполнение и отображение результатов для запроса: '{query_text}'")
+        logger.info(f"Выполнение и отображение результатов для запроса: '{query_text}'")
 
         try:
             results = self.query(query_text, n)
             self.present(results)
-            ir_logger.info("Результаты успешно отображены")
+            logger.info("Результаты успешно отображены")
         except Exception as e:
-            ir_logger.error(f"Ошибка при выполнении запроса '{query_text}': {e}", exc_info=True)
+            logger.error(f"Ошибка при выполнении запроса '{query_text}': {e}", exc_info=True)
             print(f"Error processing query: {e}")
 
 
@@ -786,33 +1121,35 @@ class UnixConsultant(IRSystem):
     """A trivial IR system over a small collection of Unix man pages."""
 
     def __init__(self):
-        ir_logger.info("Создание UnixConsultant (специализированная IR система для man-страниц)")
+        with log_context("UnixConsultant.__init__"):
+            logger.info("Создание UnixConsultant (специализированная IR система для man-страниц)")
 
-        with log_execution_time("UnixConsultant.__init__"):
             IRSystem.__init__(self, stopwords="how do i the a of")
 
             import os
             aima_root = os.path.dirname(__file__)
             mandir = os.path.join(aima_root, 'aima-data/MAN/')
 
-            ir_logger.debug(f"Поиск man-страниц в директории: {mandir}")
+            logger.debug(f"Поиск man-страниц в директории: {mandir}")
 
             try:
                 if not os.path.exists(mandir):
-                    ir_logger.error(f"Директория с man-страницами не найдена: {mandir}")
+                    logger.error(f"Директория с man-страницами не найдена: {mandir}")
                     raise FileNotFoundError(f"Directory not found: {mandir}")
 
                 man_files = [os.path.join(mandir, f) for f in os.listdir(mandir) if f.endswith('.txt')]
-                ir_logger.info(f"Найдено {len(man_files)} man-страниц в директории {mandir}")
+                logger.info(f"Найдено {len(man_files)} man-страниц в директории {mandir}")
 
                 if not man_files:
-                    ir_logger.warning("Не найдено ни одного файла с man-страницами")
+                    logger.warning("Не найдено ни одного файла с man-страницами")
 
                 self.index_collection(man_files)
-                ir_logger.info(f"UnixConsultant создан успешно. Проиндексировано {len(self.documents)} документов")
+                logger.info(f"UnixConsultant создан успешно. Проиндексировано {len(self.documents)} документов")
+
+                metrics.increment_counter("ir.unix_consultant.created")
 
             except Exception as e:
-                ir_logger.error(f"Ошибка при создании UnixConsultant: {e}", exc_info=True)
+                logger.error(f"Ошибка при создании UnixConsultant: {e}", exc_info=True)
                 raise
 
 
@@ -820,7 +1157,7 @@ class Document:
     """Metadata for a document: title and url; maybe add others later."""
 
     def __init__(self, title, url, nwords):
-        ir_logger.debug(f"Создание документа: title='{title[:30]}...', url={url}, nwords={nwords}")
+        logger.debug(f"Создание документа: title='{title[:30]}...', url={url}, nwords={nwords}")
         self.title = title
         self.url = url
         self.nwords = nwords
@@ -830,10 +1167,11 @@ class Document:
 
 
 # =============================================================================
-# УТИЛИТЫ
+# УТИЛИТЫ С ПРОДВИНУТЫМ ЛОГИРОВАНИЕМ
 # =============================================================================
 
-@log_exceptions
+@lru_cache(maxsize=128)
+@log_operation("words", level='DEBUG', log_args=True, log_result=True)
 def words(text, reg=re.compile('[a-z0-9]+')):
     """Return a list of the words in text, ignoring punctuation and
     converting everything to lowercase (to canonicalize).
@@ -842,15 +1180,15 @@ def words(text, reg=re.compile('[a-z0-9]+')):
     """
     try:
         result = reg.findall(text.lower())
-        utils_logger.debug(f"Извлечено {len(result)} слов из текста (первые 5: {result[:5]})")
-        perf_logger.increment_counter("words_extracted", len(result))
+        logger.debug(f"Извлечено {len(result)} слов из текста (первые 5: {result[:5]})")
+        metrics.increment_counter("utils.words.extracted", len(result))
         return result
     except Exception as e:
-        utils_logger.error(f"Ошибка при извлечении слов из текста: {e}")
+        logger.error(f"Ошибка при извлечении слов из текста: {e}")
         return []
 
 
-@log_exceptions
+@log_operation("canonicalize", level='DEBUG', log_args=True, log_result=True)
 def canonicalize(text):
     """Return a canonical text: only lowercase letters and blanks.
     >>> canonicalize("``EGAD!'' Edgar cried.")
@@ -858,15 +1196,16 @@ def canonicalize(text):
     """
     try:
         result = ' '.join(words(text))
-        utils_logger.debug(f"Канонизированный текст (первые 50 символов): '{result[:50]}...'")
+        logger.debug(f"Канонизированный текст (первые 50 символов): '{result[:50]}...'")
+        metrics.increment_counter("utils.canonicalize.calls")
         return result
     except Exception as e:
-        utils_logger.error(f"Ошибка при канонизации текста: {e}")
+        logger.error(f"Ошибка при канонизации текста: {e}")
         return ""
 
 
 # =============================================================================
-# ШИФРЫ
+# ШИФРЫ С ПРОДВИНУТЫМ ЛОГИРОВАНИЕМ
 # =============================================================================
 
 # Example application (not in book): decode a cipher.
@@ -879,19 +1218,20 @@ alphabet = 'abcdefghijklmnopqrstuvwxyz'
 
 # Encoding
 
-@log_exceptions
+@log_operation("shift_encode", level='DEBUG', log_args=True, log_result=True)
 def shift_encode(plaintext, n):
     """Encode text with a shift cipher that moves each letter up by n letters.
     >>> shift_encode('abc z', 1)
     'bcd a'
     """
-    utils_logger.debug(f"Шифрование сдвигом (n={n}): '{plaintext[:20]}...'")
+    logger.debug(f"Шифрование сдвигом (n={n}): '{plaintext[:20]}...'")
     result = encode(plaintext, alphabet[n:] + alphabet[:n])
-    utils_logger.debug(f"Результат шифрования: '{result[:20]}...'")
+    logger.debug(f"Результат шифрования: '{result[:20]}...'")
+    metrics.increment_counter("ciphers.shift.encode")
     return result
 
 
-@log_exceptions
+@log_operation("rot13", level='DEBUG', log_args=True, log_result=True)
 def rot13(plaintext):
     """Encode text by rotating letters by 13 spaces in the alphabet.
     >>> rot13('hello')
@@ -899,47 +1239,48 @@ def rot13(plaintext):
     >>> rot13(rot13('hello'))
     'hello'
     """
-    utils_logger.debug(f"ROT13 шифрование: '{plaintext[:20]}...'")
+    logger.debug(f"ROT13 шифрование: '{plaintext[:20]}...'")
     result = shift_encode(plaintext, 13)
-    utils_logger.debug(f"Результат ROT13: '{result[:20]}...'")
+    logger.debug(f"Результат ROT13: '{result[:20]}...'")
+    metrics.increment_counter("ciphers.rot13.encode")
     return result
 
 
-@log_exceptions
+@log_operation("translate", level='DEBUG', log_args=True, log_result=True)
 def translate(plaintext, function):
     """Translate chars of a plaintext with the given function."""
-    utils_logger.debug(f"Перевод текста (длина={len(plaintext)})")
+    logger.debug(f"Перевод текста (длина={len(plaintext)})")
     result = ""
     for char in plaintext:
         result += function(char)
-    utils_logger.debug(f"Перевод завершен. Результат: '{result[:20]}...'")
+    logger.debug(f"Перевод завершен. Результат: '{result[:20]}...'")
     return result
 
 
-@log_exceptions
+@log_operation("maketrans", level='DEBUG', log_args=True, log_result=True)
 def maketrans(from_, to_):
     """Create a translation table and return the proper function."""
-    utils_logger.debug(f"Создание таблицы перевода: from_='{from_}', to_='{to_}'")
+    logger.debug(f"Создание таблицы перевода: from_='{from_}', to_='{to_}'")
     trans_table = {}
     for n, char in enumerate(from_):
         trans_table[char] = to_[n]
 
-    utils_logger.debug(f"Таблица перевода создана ({len(trans_table)} записей)")
+    logger.debug(f"Таблица перевода создана ({len(trans_table)} записей)")
     return lambda char: trans_table.get(char, char)
 
 
-@log_exceptions
+@log_operation("encode", level='DEBUG', log_args=True, log_result=True)
 def encode(plaintext, code):
     """Encode text using a code which is a permutation of the alphabet."""
-    utils_logger.debug(f"Кодирование текста длиной {len(plaintext)} символов")
+    logger.debug(f"Кодирование текста длиной {len(plaintext)} символов")
     trans = maketrans(alphabet + alphabet.upper(), code + code.upper())
 
     result = translate(plaintext, trans)
-    utils_logger.debug(f"Текст закодирован. Результат: '{result[:20]}...'")
+    logger.debug(f"Текст закодирован. Результат: '{result[:20]}...'")
     return result
 
 
-@log_exceptions
+@log_operation("bigrams", level='DEBUG', log_args=True, log_result=True)
 def bigrams(text):
     """Return a list of pairs in text (a sequence of letters or words).
     >>> bigrams('this')
@@ -947,9 +1288,10 @@ def bigrams(text):
     >>> bigrams(['this', 'is', 'a', 'test'])
     [['this', 'is'], ['is', 'a'], ['a', 'test']]
     """
-    utils_logger.debug(f"Создание биграмм из текста длиной {len(text)}")
+    logger.debug(f"Создание биграмм из текста длиной {len(text)}")
     result = [text[i:i + 2] for i in range(len(text) - 1)]
-    utils_logger.debug(f"Создано {len(result)} биграмм. Первые 5: {result[:5]}")
+    logger.debug(f"Создано {len(result)} биграмм. Первые 5: {result[:5]}")
+    metrics.increment_counter("utils.bigrams.created", len(result))
     return result
 
 
@@ -962,88 +1304,91 @@ class ShiftDecoder:
     bigram probability distribution."""
 
     def __init__(self, training_text):
-        decoders_logger.info("Создание ShiftDecoder")
-        decoders_logger.debug(f"Длина тренировочного текста: {len(training_text)} символов")
+        with log_context("ShiftDecoder.__init__"):
+            logger.info("Создание ShiftDecoder")
+            logger.debug(f"Длина тренировочного текста: {len(training_text)} символов")
 
-        with log_execution_time("ShiftDecoder.__init__"):
             training_text = canonicalize(training_text)
-            decoders_logger.debug(f"Длина канонизированного текста: {len(training_text)} символов")
+            logger.debug(f"Длина канонизированного текста: {len(training_text)} символов")
 
             self.P2 = CountingProbDist(bigrams(training_text), default=1)
-            decoders_logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
+            logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
 
-    @log_exceptions
+            metrics.increment_counter("decoders.shift.created")
+
+    @log_operation("ShiftDecoder.score", level='DEBUG', log_args=True, log_result=True)
     def score(self, plaintext):
         """Return a score for text based on how common letters pairs are."""
-        decoders_logger.debug(f"Вычисление скоринга для текста: '{plaintext[:30]}...'")
+        logger.debug(f"Вычисление скоринга для текста: '{plaintext[:30]}...'")
 
         s = 1.0
         bigram_list = bigrams(plaintext)
-        decoders_logger.debug(f"Анализ {len(bigram_list)} биграмм")
+        logger.debug(f"Анализ {len(bigram_list)} биграмм")
 
         for bi in bigram_list:
             try:
                 prob = self.P2[bi]
                 s = s * prob
-                decoders_logger.debug(f"Биграмма '{bi}': вероятность={prob}, текущий score={s}")
+                logger.debug(f"Биграмма '{bi}': вероятность={prob}, текущий score={s}")
             except Exception as e:
-                decoders_logger.warning(f"Ошибка при обработке биграммы '{bi}': {e}")
+                logger.warning(f"Ошибка при обработке биграммы '{bi}': {e}")
                 # Используем вероятность по умолчанию для продолжения
                 s = s * self.P2.default
 
-        decoders_logger.debug(f"Итоговый score: {s}")
+        logger.debug(f"Итоговый score: {s}")
         return s
 
-    @log_exceptions
+    @log_operation("ShiftDecoder.decode", log_args=True, log_result=True)
     def decode(self, ciphertext):
         """Return the shift decoding of text with the best score."""
-        decoders_logger.info(f"Декодирование шифротекста: '{ciphertext[:30]}...'")
+        logger.info(f"Декодирование шифротекста: '{ciphertext[:30]}...'")
 
         if not ciphertext:
-            decoders_logger.warning("Пустой шифротекст передан для декодирования")
+            logger.warning("Пустой шифротекст передан для декодирования")
             return ciphertext
 
-        with log_execution_time(f"ShiftDecoder.decode({len(ciphertext)})"):
-            try:
-                all_decodings = list(all_shifts(ciphertext))
-                decoders_logger.debug(f"Сгенерировано {len(all_decodings)} вариантов декодирования")
+        try:
+            all_decodings = list(all_shifts(ciphertext))
+            logger.debug(f"Сгенерировано {len(all_decodings)} вариантов декодирования")
 
-                # Вычисляем скоринг для каждого варианта
-                scored_decodings = []
-                for i, decoding in enumerate(all_decodings):
-                    score = self.score(decoding)
-                    scored_decodings.append((score, decoding))
+            # Вычисляем скоринг для каждого варианта
+            scored_decodings = []
+            for i, decoding in enumerate(all_decodings):
+                score = self.score(decoding)
+                scored_decodings.append((score, decoding))
 
-                    if i % 5 == 0:  # Логируем каждые 5 вариантов
-                        decoders_logger.debug(f"Вариант {i}: score={score:.10f}, text='{decoding[:20]}...'")
+                if i % 5 == 0:  # Логируем каждые 5 вариантов
+                    logger.debug(f"Вариант {i}: score={score:.10f}, text='{decoding[:20]}...'")
 
-                # Выбираем лучший вариант
-                best_score, best_decoding = max(scored_decodings, key=lambda x: x[0])
-                decoders_logger.info(f"Найдено лучшее декодирование со score={best_score:.10f}")
-                decoders_logger.debug(f"Лучший результат: '{best_decoding[:50]}...'")
+            # Выбираем лучший вариант
+            best_score, best_decoding = max(scored_decodings, key=lambda x: x[0])
+            logger.info(f"Найдено лучшее декодирование со score={best_score:.10f}")
+            logger.debug(f"Лучший результат: '{best_decoding[:50]}...'")
 
-                perf_logger.increment_counter("shift_decodings")
+            # Записываем метрики
+            metrics.increment_counter("decoders.shift.decodings")
+            metrics.record_metric("decoders.shift.best_score", best_score)
 
-                return best_decoding
+            return best_decoding
 
-            except Exception as e:
-                decoders_logger.error(f"Ошибка при декодировании шифротекста: {e}", exc_info=True)
-                # Возвращаем оригинальный текст в случае ошибки
-                return ciphertext
+        except Exception as e:
+            logger.error(f"Ошибка при декодировании шифротекста: {e}", exc_info=True)
+            # Возвращаем оригинальный текст в случае ошибки
+            return ciphertext
 
 
-@log_exceptions
+@log_operation("all_shifts", level='DEBUG', log_args=True)
 def all_shifts(text):
     """Return a list of all 26 possible encodings of text by a shift cipher."""
-    decoders_logger.debug(f"Генерация всех 26 сдвигов для текста: '{text[:20]}...'")
+    logger.debug(f"Генерация всех 26 сдвигов для текста: '{text[:20]}...'")
 
     for i, _ in enumerate(alphabet):
         try:
             shifted = shift_encode(text, i)
-            decoders_logger.debug(f"Сдвиг {i}: '{shifted[:20]}...'")
+            logger.debug(f"Сдвиг {i}: '{shifted[:20]}...'")
             yield shifted
         except Exception as e:
-            decoders_logger.error(f"Ошибка при генерации сдвига {i} для текста: {e}")
+            logger.error(f"Ошибка при генерации сдвига {i} для текста: {e}")
             yield text  # Возвращаем оригинальный текст в случае ошибки
 
 
@@ -1065,74 +1410,77 @@ class PermutationDecoder:
     represent that 'z' will be translated to 'e'."""
 
     def __init__(self, training_text, ciphertext=None):
-        decoders_logger.info("Создание PermutationDecoder")
-        decoders_logger.debug(f"Длина тренировочного текста: {len(training_text)} символов")
+        with log_context("PermutationDecoder.__init__"):
+            logger.info("Создание PermutationDecoder")
+            logger.debug(f"Длина тренировочного текста: {len(training_text)} символов")
 
-        with log_execution_time("PermutationDecoder.__init__"):
             try:
                 self.Pwords = UnigramWordModel(words(training_text))
                 self.P1 = UnigramWordModel(training_text)  # By letter
                 self.P2 = NgramWordModel(2, words(training_text))  # By letter pair
 
-                decoders_logger.debug(f"PermutationDecoder создан. "
+                logger.debug(f"PermutationDecoder создан. "
                             f"Pwords размер: {len(self.Pwords)}, "
                             f"P1 размер: {len(self.P1)}, "
                             f"P2 размер: {len(self.P2)}")
 
                 if ciphertext:
-                    decoders_logger.debug(f"Начальный шифротекст: '{ciphertext[:30]}...'")
+                    logger.debug(f"Начальный шифротекст: '{ciphertext[:30]}...'")
+
+                metrics.increment_counter("decoders.permutation.created")
 
             except Exception as e:
-                decoders_logger.error(f"Ошибка при создании PermutationDecoder: {e}", exc_info=True)
+                logger.error(f"Ошибка при создании PermutationDecoder: {e}", exc_info=True)
                 raise
 
-    @log_exceptions
+    @log_operation("PermutationDecoder.decode", log_args=True, log_result=True)
     def decode(self, ciphertext):
         """Search for a decoding of the ciphertext."""
-        decoders_logger.info(f"Начало декодирования PermutationCipher: '{ciphertext[:30]}...'")
+        logger.info(f"Начало декодирования PermutationCipher: '{ciphertext[:30]}...'")
 
-        with log_execution_time(f"PermutationDecoder.decode({len(ciphertext)})"):
-            try:
-                self.ciphertext = canonicalize(ciphertext)
-                decoders_logger.debug(f"Канонизированный шифротекст: '{self.ciphertext[:30]}...'")
+        try:
+            self.ciphertext = canonicalize(ciphertext)
+            logger.debug(f"Канонизированный шифротекст: '{self.ciphertext[:30]}...'")
 
-                # reduce domain to speed up search
-                self.chardomain = {c for c in self.ciphertext if c != ' '}
-                decoders_logger.debug(f"Домен символов для декодирования: {sorted(self.chardomain)}")
+            # reduce domain to speed up search
+            self.chardomain = {c for c in self.ciphertext if c != ' '}
+            logger.debug(f"Домен символов для декодирования: {sorted(self.chardomain)}")
 
-                problem = PermutationDecoderProblem(decoder=self)
-                decoders_logger.debug("PermutationDecoderProblem создан")
+            problem = PermutationDecoderProblem(decoder=self)
+            logger.debug("PermutationDecoderProblem создан")
 
-                decoders_logger.info("Начало поиска наилучшей перестановки...")
-                solution = search.best_first_graph_search(
-                    problem, lambda node: self.score(node.state))
+            logger.info("Начало поиска наилучшей перестановки...")
+            solution = search.best_first_graph_search(
+                problem, lambda node: self.score(node.state))
 
-                if not solution:
-                    decoders_logger.error("Поиск не нашел решения!")
-                    return ciphertext
-
-                decoders_logger.debug(f"Решение найдено: {solution.state}")
-
-                solution.state[' '] = ' '
-                decoded = translate(self.ciphertext, lambda c: solution.state[c])
-
-                decoders_logger.info(f"Декодирование завершено. Результат: '{decoded[:50]}...'")
-                decoders_logger.debug(f"Полная таблица декодирования: {solution.state}")
-
-                perf_logger.increment_counter("permutation_decodings")
-
-                return decoded
-
-            except Exception as e:
-                decoders_logger.error(f"Ошибка при декодировании PermutationCipher: {e}", exc_info=True)
-                # Возвращаем оригинальный текст в случае ошибки
+            if not solution:
+                logger.error("Поиск не нашел решения!")
                 return ciphertext
 
-    @log_exceptions
+            logger.debug(f"Решение найдено: {solution.state}")
+
+            solution.state[' '] = ' '
+            decoded = translate(self.ciphertext, lambda c: solution.state[c])
+
+            logger.info(f"Декодирование завершено. Результат: '{decoded[:50]}...'")
+            logger.debug(f"Полная таблица декодирования: {solution.state}")
+
+            # Записываем метрики
+            metrics.increment_counter("decoders.permutation.decodings")
+            metrics.record_metric("decoders.permutation.domain_size", len(self.chardomain))
+
+            return decoded
+
+        except Exception as e:
+            logger.error(f"Ошибка при декодировании PermutationCipher: {e}", exc_info=True)
+            # Возвращаем оригинальный текст в случае ошибки
+            return ciphertext
+
+    @log_operation("PermutationDecoder.score", level='DEBUG', log_args=True, log_result=True)
     def score(self, code):
         """Score is product of word scores, unigram scores, and bigram scores.
         This can get very small, so we use logs and exp."""
-        decoders_logger.debug(f"Вычисление скоринга для кода: {code}")
+        logger.debug(f"Вычисление скоринга для кода: {code}")
 
         try:
             # remake code dictionary to contain translation for all characters
@@ -1140,10 +1488,10 @@ class PermutationDecoder:
             full_code.update({x: x for x in self.chardomain if x not in code})
             full_code[' '] = ' '
 
-            decoders_logger.debug(f"Полный код перевода: {full_code}")
+            logger.debug(f"Полный код перевода: {full_code}")
 
             text = translate(self.ciphertext, lambda c: full_code[c])
-            decoders_logger.debug(f"Переведенный текст: '{text[:30]}...'")
+            logger.debug(f"Переведенный текст: '{text[:30]}...'")
 
             # add small positive value to prevent computing log(0)
             word_log_sum = sum(np.log(self.Pwords[word] + 1e-20) for word in words(text))
@@ -1152,19 +1500,19 @@ class PermutationDecoder:
 
             total_log = word_log_sum + char_log_sum + bigram_log_sum
 
-            decoders_logger.debug(f"Суммы логарифмов: "
+            logger.debug(f"Суммы логарифмов: "
                         f"words={word_log_sum:.4f}, "
                         f"chars={char_log_sum:.4f}, "
                         f"bigrams={bigram_log_sum:.4f}, "
                         f"total={total_log:.4f}")
 
             score = -np.exp(total_log)
-            decoders_logger.debug(f"Итоговый score: {score}")
+            logger.debug(f"Итоговый score: {score}")
 
             return score
 
         except Exception as e:
-            decoders_logger.error(f"Ошибка при вычислении скоринга: {e}")
+            logger.error(f"Ошибка при вычислении скоринга: {e}")
             # Возвращаем очень плохой score в случае ошибки
             return -np.inf
 
@@ -1173,73 +1521,74 @@ class PermutationDecoderProblem(search.Problem):
     """Problem for searching the best permutation decoding."""
 
     def __init__(self, initial=None, goal=None, decoder=None):
-        decoders_logger.debug(f"Инициализация PermutationDecoderProblem, decoder: {type(decoder).__name__}")
+        logger.debug(f"Инициализация PermutationDecoderProblem, decoder: {type(decoder).__name__}")
         super().__init__(initial or hashabledict(), goal)
         self.decoder = decoder
 
         if decoder and decoder.chardomain:
-            decoders_logger.debug(f"Размер домена символов: {len(decoder.chardomain)}")
+            logger.debug(f"Размер домена символов: {len(decoder.chardomain)}")
 
-    @log_exceptions
+    @log_operation("PermutationDecoderProblem.actions", level='DEBUG', log_args=True, log_result=True)
     def actions(self, state):
         """Return possible actions from this state."""
-        decoders_logger.debug(f"Получение действий для состояния: {state}")
+        logger.debug(f"Получение действий для состояния: {state}")
 
         try:
             search_list = [c for c in self.decoder.chardomain if c not in state]
             target_list = [c for c in alphabet if c not in state.values()]
 
-            decoders_logger.debug(f"Доступные символы для замены: {search_list}")
-            decoders_logger.debug(f"Доступные целевые символы: {target_list}")
+            logger.debug(f"Доступные символы для замены: {search_list}")
+            logger.debug(f"Доступные целевые символы: {target_list}")
 
             if not search_list or not target_list:
-                decoders_logger.debug("Нет доступных действий")
+                logger.debug("Нет доступных действий")
                 return []
 
             # Find the best character to replace
             plain_char = max(search_list, key=lambda c: self.decoder.P1[c])
-            decoders_logger.debug(f"Выбран символ для замены: '{plain_char}' "
+            logger.debug(f"Выбран символ для замены: '{plain_char}' "
                         f"(вероятность: {self.decoder.P1[plain_char]})")
 
             actions = []
             for cipher_char in target_list:
                 actions.append((plain_char, cipher_char))
 
-            decoders_logger.debug(f"Сгенерировано {len(actions)} действий")
+            logger.debug(f"Сгенерировано {len(actions)} действий")
+            metrics.increment_counter("search.permutation.actions_generated", len(actions))
             return actions
 
         except Exception as e:
-            decoders_logger.error(f"Ошибка при генерации действий: {e}")
+            logger.error(f"Ошибка при генерации действий: {e}")
             return []
 
-    @log_exceptions
+    @log_operation("PermutationDecoderProblem.result", level='DEBUG', log_args=True, log_result=True)
     def result(self, state, action):
         """Return the state that results from executing the given action."""
-        decoders_logger.debug(f"Применение действия {action} к состоянию {state}")
+        logger.debug(f"Применение действия {action} к состоянию {state}")
 
         try:
             new_state = hashabledict(state)  # copy to prevent hash issues
             new_state[action[0]] = action[1]
-            decoders_logger.debug(f"Новое состояние: {new_state}")
+            logger.debug(f"Новое состояние: {new_state}")
             return new_state
         except Exception as e:
-            decoders_logger.error(f"Ошибка при применении действия: {e}")
+            logger.error(f"Ошибка при применении действия: {e}")
             return state
 
-    @log_exceptions
+    @log_operation("PermutationDecoderProblem.goal_test", level='DEBUG', log_args=True, log_result=True)
     def goal_test(self, state):
         """We're done when all letters in search domain are assigned."""
         is_goal = len(state) >= len(self.decoder.chardomain)
-        decoders_logger.debug(f"Проверка цели: состояние имеет {len(state)} назначений, "
+        logger.debug(f"Проверка цели: состояние имеет {len(state)} назначений, "
                     f"требуется {len(self.decoder.chardomain)}. Цель достигнута: {is_goal}")
         return is_goal
 
 
 # =============================================================================
-# ТЕСТИРОВАНИЕ И ТОЧКА ВХОДА
+# ТЕСТИРОВАНИЕ, МОНИТОРИНГ И ТОЧКА ВХОДА
 # =============================================================================
 
-@log_exceptions
+@log_operation("test_decoders", log_args=False)
 def test_decoders():
     """Функция для тестирования декодеров с логированием."""
     logger.info("Начало тестирования декодеров")
@@ -1250,7 +1599,7 @@ def test_decoders():
     # Тестовый шифротекст
     ciphertext = "uryyb jbeyq"
 
-    with log_execution_time("test_decoders"):
+    with log_context("test_decoders_execution"):
         try:
             # Тестируем ShiftDecoder
             logger.info("Тестирование ShiftDecoder...")
@@ -1270,12 +1619,12 @@ def test_decoders():
             logger.error(f"Ошибка при тестировании декодеров: {e}", exc_info=True)
 
 
-@log_exceptions
+@log_operation("run_demo", log_args=False)
 def run_demo():
     """Запуск демонстрации возможностей системы"""
     logger.info("Запуск демонстрации модуля text.py")
 
-    with log_execution_time("run_demo"):
+    with log_context("demo_execution"):
         try:
             # Простой тест моделей
             logger.info("Создание тестовой UnigramWordModel...")
@@ -1288,24 +1637,174 @@ def run_demo():
             logger.info("Все тесты завершены успешно")
 
             # Логируем итоговые метрики
-            perf_logger.log_metrics()
+            metrics_report = metrics.get_metrics_report()
+            logger.info("Метрики работы системы:")
+            for counter_name, count in metrics_report['counters'].items():
+                logger.info(f"  {counter_name}: {count}")
+
+            # Также логируем в JSON формате для последующего анализа
+            metrics_logger.info("Итоговые метрики", extra=metrics_report)
 
         except Exception as e:
             logger.critical(f"Критическая ошибка при выполнении тестов: {e}", exc_info=True)
 
 
+def log_system_info():
+    """Логирование информации о системе"""
+    logger.info("=" * 60)
+    logger.info("ИНФОРМАЦИЯ О СИСТЕМЕ")
+    logger.info("=" * 60)
+
+    # Информация о Python
+    logger.info(f"Python версия: {sys.version}")
+    logger.info(f"Python исполняемый файл: {sys.executable}")
+
+    # Информация о платформе
+    logger.info(f"Платформа: {sys.platform}")
+
+    # Информация о путях
+    logger.info(f"Рабочая директория: {os.getcwd()}")
+
+    # Информация о NumPy
+    logger.info(f"NumPy версия: {np.__version__}")
+
+    # Информация о логировании
+    logger.info("Конфигурация логирования:")
+    for handler in logger.handlers:
+        logger.info(f"  Обработчик: {type(handler).__name__}, уровень: {logging.getLevelName(handler.level)}")
+
+    logger.info("=" * 60)
+
+
+class HealthCheck:
+    """Класс для проверки здоровья системы"""
+
+    def __init__(self):
+        self.checks = []
+        self.last_check = None
+
+    def add_check(self, name: str, check_func: Callable[[], bool],
+                 critical: bool = False):
+        """Добавление проверки"""
+        self.checks.append({
+            'name': name,
+            'func': check_func,
+            'critical': critical
+        })
+
+    def run_checks(self) -> Dict[str, Dict[str, Any]]:
+        """Запуск всех проверок"""
+        logger.info("Запуск проверок здоровья системы")
+
+        results = {}
+        all_passed = True
+
+        for check in self.checks:
+            try:
+                passed = check['func']()
+                results[check['name']] = {
+                    'passed': passed,
+                    'critical': check['critical']
+                }
+
+                if passed:
+                    logger.info(f"Проверка '{check['name']}': ПРОЙДЕНА")
+                else:
+                    logger.warning(f"Проверка '{check['name']}': НЕ ПРОЙДЕНА")
+                    if check['critical']:
+                        all_passed = False
+
+            except Exception as e:
+                logger.error(f"Ошибка при выполнении проверки '{check['name']}': {e}")
+                results[check['name']] = {
+                    'passed': False,
+                    'critical': check['critical'],
+                    'error': str(e)
+                }
+                if check['critical']:
+                    all_passed = False
+
+        self.last_check = datetime.now()
+
+        if all_passed:
+            logger.info("Все проверки здоровья пройдены успешно")
+        else:
+            logger.error("Некоторые критические проверки здоровья не пройдены")
+
+        return results
+
+
 # Точка входа
 if __name__ == "__main__":
     try:
-        logger.info(f"Запуск модуля text.py в {datetime.now()}")
-        logger.debug(f"Аргументы командной строки: {sys.argv}")
+        # Логируем информацию о системе
+        log_system_info()
 
-        run_demo()
+        # Регистрируем основные логгеры в менеджере уровней
+        level_manager.register_logger(logger, 'INFO', 'Основной логгер системы')
+        level_manager.register_logger(logging.getLogger('text_processing.models'),
+                                     'INFO', 'Логгер моделей языка')
+        level_manager.register_logger(logging.getLogger('text_processing.ir'),
+                                     'INFO', 'Логгер информационно-поисковой системы')
+        level_manager.register_logger(logging.getLogger('text_processing.decoders'),
+                                     'INFO', 'Логгер декодеров шифров')
 
-        logger.info(f"Модуль text.py завершил работу в {datetime.now()}")
+        # Настраиваем HealthCheck
+        health_check = HealthCheck()
+
+        def check_logging():
+            """Проверка работоспособности логирования"""
+            test_logger = logging.getLogger('health_check')
+            test_logger.debug("Тестовое сообщение DEBUG")
+            test_logger.info("Тестовое сообщение INFO")
+            test_logger.warning("Тестовое сообщение WARNING")
+            return True
+
+        def check_numpy():
+            """Проверка работоспособности NumPy"""
+            try:
+                arr = np.array([1, 2, 3])
+                return len(arr) == 3
+            except:
+                return False
+
+        health_check.add_check('Логирование', check_logging, critical=True)
+        health_check.add_check('NumPy', check_numpy, critical=True)
+
+        # Запускаем проверки здоровья
+        health_results = health_check.run_checks()
+
+        # Запускаем демо, если все проверки пройдены
+        if all(result['passed'] for result in health_results.values()
+               if result.get('critical', False)):
+            logger.info(f"Старт работы системы в {datetime.now()}")
+            logger.debug(f"Аргументы командной строки: {sys.argv}")
+
+            run_demo()
+
+            logger.info(f"Система завершила работу в {datetime.now()}")
+
+            # Финализируем метрики
+            final_metrics = metrics.get_metrics_report()
+            logger.info("Финальные метрики системы:")
+            for key, value in final_metrics['counters'].items():
+                logger.info(f"  {key}: {value}")
+        else:
+            logger.critical("Система не может быть запущена из-за критических ошибок")
+            sys.exit(1)
 
     except KeyboardInterrupt:
-        logger.info("Работа прервана пользователем")
+        logger.info("Работа прервана пользователем (Ctrl+C)")
     except Exception as e:
-        logger.critical(f"Непредвиденная ошибка: {e}", exc_info=True)
+        logger.critical(f"Непредвиденная ошибка при запуске системы: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        # Сохраняем финальные метрики в файл
+        try:
+            metrics_file = Path('logs') / 'final_metrics.json'
+            final_report = metrics.get_metrics_report()
+            with open(metrics_file, 'w', encoding='utf-8') as f:
+                json.dump(final_report, f, indent=2, ensure_ascii=False)
+            logger.info(f"Финальные метрики сохранены в {metrics_file}")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении метрик: {e}")
