@@ -20,16 +20,46 @@ from probabilistic_learning import CountingProbDist
 from utils import hashabledict
 
 
-# Настройка логирования для первого коммита
+# Улучшенная настройка логирования для второго коммита
 def setup_logging():
-    """Настройка базового логирования в консоль"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    """Настройка логирования с несколькими обработчиками"""
+    logger = logging.getLogger(__name__)
+
+    # Очищаем существующие обработчики, если они есть
+    logger.handlers.clear()
+
+    # Устанавливаем уровень для нашего логгера
+    logger.setLevel(logging.DEBUG)
+
+    # Создаем обработчик для консоли
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    # Создаем обработчик для файла (только для отладочных сообщений)
+    file_handler = logging.FileHandler('text_processing.log', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+
+    # Создаем форматтер
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    logger = logging.getLogger(__name__)
-    logger.info("Логирование инициализировано")
+
+    console_handler.setFormatter(console_formatter)
+    file_handler.setFormatter(file_formatter)
+
+    # Добавляем обработчики к логгеру
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    logger.info("Логирование инициализировано (консоль: INFO, файл: DEBUG)")
+    logger.debug(f"Файл лога: text_processing.log")
+
     return logger
 
 
@@ -44,17 +74,43 @@ class UnigramWordModel(CountingProbDist):
 
     def __init__(self, observations, default=0):
         logger.info(f"Создание UnigramWordModel с {len(observations) if observations else 0} наблюдениями")
+        logger.debug(f"Параметр default: {default}")
+
         # Call CountingProbDist constructor,
         # passing the observations and default parameters.
         super(UnigramWordModel, self).__init__(observations, default)
-        logger.debug(f"UnigramWordModel создан успешно")
+
+        unique_words = len(self) if hasattr(self, '__len__') else 'unknown'
+        logger.debug(f"UnigramWordModel создан успешно. Уникальных слов: {unique_words}")
 
     def samples(self, n):
         """Return a string of n words, random according to the model."""
-        logger.debug(f"Генерация {n} слов с помощью UnigramWordModel")
-        result = ' '.join(self.sample() for i in range(n))
-        logger.debug(f"Сгенерировано {n} слов")
+        logger.info(f"Генерация {n} слов с помощью UnigramWordModel")
+
+        if n <= 0:
+            logger.warning(f"Запрошена генерация {n} слов. Возвращаем пустую строку.")
+            return ''
+
+        words = []
+        for i in range(n):
+            word = self.sample()
+            words.append(word)
+            if i % 20 == 0 and i > 0:  # Логируем каждые 20 слов
+                logger.debug(f"Сгенерировано {i+1}/{n} слов")
+
+        result = ' '.join(words)
+        logger.debug(f"Сгенерировано {n} слов. Первые 5: {words[:5]}")
         return result
+
+    def __getitem__(self, word):
+        """Override to add logging for probability queries"""
+        try:
+            prob = super().__getitem__(word)
+            logger.debug(f"Вероятность слова '{word}': {prob}")
+            return prob
+        except KeyError as e:
+            logger.warning(f"Слово '{word}' не найдено в модели. Возвращаем вероятность по умолчанию.")
+            return self.default
 
 
 class NgramWordModel(CountingProbDist):
@@ -63,36 +119,71 @@ class NgramWordModel(CountingProbDist):
     builds up an n-word sequence; P.add_cond_prob and P.add_sequence add data."""
 
     def __init__(self, n, observation_sequence=None, default=0):
+        if n <= 0:
+            logger.error(f"Попытка создать NgramWordModel с n={n}. n должно быть > 0.")
+            raise ValueError("n must be > 0")
+
         logger.info(f"Создание NgramWordModel с n={n}")
+        if observation_sequence:
+            logger.debug(f"Начальная последовательность: {len(observation_sequence)} элементов")
+
         # In addition to the dictionary of n-tuples, cond_prob is a
         # mapping from (w1, ..., wn-1) to P(wn | w1, ... wn-1)
         CountingProbDist.__init__(self, default=default)
         self.n = n
         self.cond_prob = defaultdict()
         self.add_sequence(observation_sequence or [])
-        logger.debug(f"NgramWordModel с n={n} создан успешно")
 
-    # __getitem__, top, sample inherited from CountingProbDist
-    # Note that they deal with tuples, not strings, as inputs
+        cond_prob_size = len(self.cond_prob)
+        logger.debug(f"NgramWordModel создан успешно. Условных распределений: {cond_prob_size}")
+
+    def __getitem__(self, ngram):
+        """Override to add logging for ngram probability queries"""
+        try:
+            prob = super().__getitem__(ngram)
+            logger.debug(f"Вероятность n-граммы {ngram}: {prob}")
+            return prob
+        except KeyError as e:
+            logger.debug(f"N-грамма {ngram} не найдена. Возвращаем вероятность по умолчанию: {self.default}")
+            return self.default
 
     def add_cond_prob(self, ngram):
         """Build the conditional probabilities P(wn | (w1, ..., wn-1)"""
         logger.debug(f"Добавление условной вероятности для n-граммы: {ngram}")
-        if ngram[:-1] not in self.cond_prob:
-            self.cond_prob[ngram[:-1]] = CountingProbDist()
-        self.cond_prob[ngram[:-1]].add(ngram[-1])
+
+        if len(ngram) != self.n:
+            logger.error(f"Некорректная длина n-граммы: {len(ngram)} (ожидается {self.n})")
+            raise ValueError(f"ngram must have length {self.n}")
+
+        prefix = ngram[:-1]
+        if prefix not in self.cond_prob:
+            logger.debug(f"Создание нового условного распределения для префикса: {prefix}")
+            self.cond_prob[prefix] = CountingProbDist()
+
+        self.cond_prob[prefix].add(ngram[-1])
+        logger.debug(f"Добавлено слово '{ngram[-1]}' для префикса {prefix}")
 
     def add_sequence(self, words):
         """Add each tuple words[i:i+n], using a sliding window."""
         n = self.n
-        logger.debug(f"Добавление последовательности из {len(words)} слов в NgramWordModel (n={n})")
 
+        if len(words) < n:
+            logger.warning(f"Последовательность слишком короткая ({len(words)} слов) для n={n}")
+            return
+
+        logger.info(f"Добавление последовательности из {len(words)} слов в NgramWordModel (n={n})")
+
+        ngram_count = 0
         for i in range(len(words) - n + 1):
             t = tuple(words[i:i + n])
             self.add(t)
             self.add_cond_prob(t)
+            ngram_count += 1
 
-        logger.debug(f"Добавлено {max(0, len(words) - n + 1)} n-грамм")
+            if ngram_count % 100 == 0:  # Логируем каждые 100 n-грамм
+                logger.debug(f"Обработано {ngram_count} n-грамм")
+
+        logger.info(f"Добавлено {ngram_count} n-грамм из {len(words)} слов")
 
     def samples(self, nwords):
         """Generate an n-word sentence by picking random samples
@@ -101,19 +192,33 @@ class NgramWordModel(CountingProbDist):
         P(c|wl-1, wl-2, ..., wl-n+1) where wl-1 ... wl-n+1 are the
         last n - 1 words in the generated sentence so far."""
         logger.info(f"Генерация {nwords} слов с помощью NgramWordModel (n={self.n})")
+
+        if nwords < self.n:
+            logger.warning(f"Запрошено {nwords} слов, но n={self.n}. Будет сгенерировано {self.n} слов.")
+            nwords = self.n
+
         n = self.n
         output = list(self.sample())
         logger.debug(f"Начальная n-грамма: {output}")
 
         for i in range(n, nwords):
             last = output[-n + 1:]
-            next_word = self.cond_prob[tuple(last)].sample()
+            prefix_tuple = tuple(last)
+
+            if prefix_tuple not in self.cond_prob:
+                logger.warning(f"Префикс {prefix_tuple} не найден в условных распределениях. Начинаем новое предложение.")
+                output.extend(self.sample())
+                continue
+
+            next_word = self.cond_prob[prefix_tuple].sample()
             output.append(next_word)
-            if i % 10 == 0:  # Логируем каждые 10 слов для отладки
-                logger.debug(f"Сгенерировано {i+1}/{nwords} слов")
+
+            if (i + 1) % 10 == 0:  # Логируем каждые 10 слов
+                logger.debug(f"Сгенерировано {i+1}/{nwords} слов. Текущее слово: '{next_word}'")
 
         result = ' '.join(output)
-        logger.info(f"Генерация завершена, получено {len(output)} слов")
+        logger.info(f"Генерация завершена. Получено {len(output)} слов")
+        logger.debug(f"Пример сгенерированного текста (первые 50 символов): {result[:50]}...")
         return result
 
 
@@ -121,8 +226,20 @@ class NgramCharModel(NgramWordModel):
     def add_sequence(self, words):
         """Add an empty space to every word to catch the beginning of words."""
         logger.debug(f"Добавление последовательности в NgramCharModel: {len(words)} слов")
-        for word in words:
-            super().add_sequence(' ' + word)
+
+        if not words:
+            logger.warning("Пустая последовательность слов передана в NgramCharModel")
+            return
+
+        total_chars = sum(len(word) + 1 for word in words)  # +1 для пробела
+        logger.debug(f"Общее количество символов для обработки: {total_chars}")
+
+        for word_idx, word in enumerate(words):
+            processed_word = ' ' + word
+            super().add_sequence(processed_word)
+
+            if word_idx % 50 == 0 and word_idx > 0:
+                logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
 
 
 class UnigramCharModel(NgramCharModel):
@@ -132,14 +249,29 @@ class UnigramCharModel(NgramCharModel):
         self.n = 1
         self.cond_prob = defaultdict()
         self.add_sequence(observation_sequence or [])
-        logger.debug("UnigramCharModel создан успешно")
+
+        total_chars = len(self) if hasattr(self, '__len__') else 'unknown'
+        logger.debug(f"UnigramCharModel создан успешно. Уникальных символов: {total_chars}")
 
     def add_sequence(self, words):
-        logger.debug(f"Добавление последовательности в UnigramCharModel: {len(words)} слов")
-        for word in words:
-            for char in word:
+        logger.info(f"Добавление последовательности в UnigramCharModel: {len(words)} слов")
+
+        char_count = 0
+        for word_idx, word in enumerate(words):
+            if not word:
+                continue
+
+            for char_idx, char in enumerate(word):
                 self.add(char)
-        logger.debug(f"Добавлено символов из {len(words)} слов")
+                char_count += 1
+
+                if char_count % 1000 == 0:
+                    logger.debug(f"Обработано {char_count} символов")
+
+            if word_idx % 100 == 0 and word_idx > 0:
+                logger.debug(f"Обработано {word_idx+1}/{len(words)} слов")
+
+        logger.info(f"Добавлено {char_count} символов из {len(words)} слов")
 
 
 # ______________________________________________________________________________
@@ -149,6 +281,11 @@ def viterbi_segment(text, P):
     """Find the best segmentation of the string of characters, given the
     UnigramWordModel P."""
     logger.info(f"Запуск алгоритма Витерби для текста длиной {len(text)} символов")
+    logger.debug(f"Текст: '{text[:50]}...' если длиннее 50 символов")
+
+    if not text:
+        logger.warning("Пустой текст передан в viterbi_segment")
+        return [], 0.0
 
     # best[i] = best probability for text[0:i]
     # words[i] = best word ending at position i
@@ -157,35 +294,75 @@ def viterbi_segment(text, P):
     best = [1.0] + [0.0] * n
 
     logger.debug(f"Инициализирован массив best размером {len(best)}")
+    logger.debug(f"Используется модель P: {type(P).__name__}")
 
     # Fill in the vectors best words via dynamic programming
-    for i in range(n + 1):
-        if i % 10 == 0 and i > 0:  # Логируем прогресс
-            logger.debug(f"Обработано {i}/{n} позиций")
+    progress_interval = max(1, n // 10)  # Логируем каждые 10%
+    for i in range(1, n + 1):
+        if i % progress_interval == 0:
+            logger.debug(f"Обработано {i}/{n} позиций ({i/n*100:.1f}%)")
+
+        best_candidate = None
+        best_prob = 0.0
+
         for j in range(0, i):
             w = text[j:i]
-            curr_score = P[w] * best[i - len(w)]
-            if curr_score >= best[i]:
-                best[i] = curr_score
-                words[i] = w
+            if not w:
+                continue
+
+            try:
+                word_prob = P[w]
+                curr_score = word_prob * best[j]
+
+                if curr_score > best_prob:
+                    best_prob = curr_score
+                    best_candidate = w
+
+            except Exception as e:
+                logger.error(f"Ошибка при обработке слова '{w}': {e}")
+                continue
+
+        if best_candidate:
+            best[i] = best_prob
+            words[i] = best_candidate
+            logger.debug(f"Позиция {i}: лучшее слово '{best_candidate}' с вероятностью {best_prob:.6f}")
+        else:
+            logger.warning(f"Не найдено подходящее слово для позиции {i}")
+            best[i] = 0.0
+            words[i] = ''
 
     logger.debug("Динамическое программирование завершено")
 
     # Now recover the sequence of best words
     sequence = []
     i = len(words) - 1
-    while i > 0:
-        sequence[0:0] = [words[i]]
-        i = i - len(words[i])
+    step_count = 0
 
-    logger.info(f"Алгоритм Витерби завершен. Найдено {len(sequence)} слов с вероятностью {best[-1]:.6f}")
+    while i > 0:
+        if step_count > n:  # Защита от бесконечного цикла
+            logger.error(f"Превышено максимальное количество шагов ({n}) при восстановлении последовательности")
+            break
+
+        current_word = words[i]
+        if not current_word:
+            logger.error(f"Пустое слово на позиции {i}. Прерывание восстановления.")
+            break
+
+        sequence.insert(0, current_word)
+        i = i - len(current_word)
+        step_count += 1
+
+        logger.debug(f"Шаг {step_count}: слово '{current_word}', переходим к позиции {i}")
+
+    final_prob = best[-1]
+    logger.info(f"Алгоритм Витерби завершен. Найдено {len(sequence)} слов с вероятностью {final_prob:.10f}")
+    logger.debug(f"Результат сегментации: {' '.join(sequence)}")
+
+    if final_prob == 0.0:
+        logger.warning("Итоговая вероятность равна 0. Возможно, текст не может быть корректно сегментирован.")
 
     # Return sequence of best words and overall probability
-    return sequence, best[-1]
-
-
-# Остальной код без изменений...
-# [Продолжение файла остается без изменений до следующих коммитов]
+    return sequence, final_prob
 
 
 # ______________________________________________________________________________
@@ -203,11 +380,16 @@ class IRSystem:
 
     def __init__(self, stopwords='the a of'):
         """Create an IR System. Optionally specify stopwords."""
+        logger.info(f"Создание IRSystem со стоп-словами: {stopwords}")
+
         # index is a map of {word: {docid: count}}, where docid is an int,
         # indicating the index into the documents list.
         self.index = defaultdict(lambda: defaultdict(int))
         self.stopwords = set(words(stopwords))
         self.documents = []
+
+        logger.debug(f"Инициализирован индекс. Стоп-слов: {len(self.stopwords)}")
+        logger.debug(f"Стоп-слова: {sorted(self.stopwords)}")
 
     def index_collection(self, filenames):
         """Index a whole collection of files."""
