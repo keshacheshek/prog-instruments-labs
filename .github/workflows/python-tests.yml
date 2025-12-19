@@ -23,6 +23,6 @@ jobs:
         pip install pytest scipy
 
     - name: Run tests
+      working-directory: ./lab_6
       run: |
-        cd lab_6
-        pytest tests.py -v
+        python -m pytest tests.py -v
