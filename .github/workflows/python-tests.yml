@@ -1,4 +1,4 @@
-name: Python Tests
+name: Lab 6 Tests
 
 on:
   push:
@@ -11,23 +11,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Setup Python 3.10
-      uses: actions/setup-python@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
         python-version: "3.10"
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install pytest scipy
 
-    - name: Run tests
-      working-directory: ./lab_6
+    # ПРЯМОЙ ЗАПУСК БЕЗ ЛИШНИХ ПРОВЕРОК
+    - name: Run tests directly
       run: |
-        echo "Текущая папка: $(pwd)"
-        echo "Файлы:"
-        ls -la
+        echo "Запуск тестов..."
         
-        python -m pytest tests.py -v
+        # Переходим в папку lab_6
+        cd lab_6
+        
+        # Создаем необходимые файлы
+        echo "0101010101" > cpp_seq.txt
+        echo "111000111000" > java_seq.txt
+        
+        # Запускаем тесты ПРЯМО через Python
+        python -c "
+import sys
+import os
+import pytest
+
+# Добавляем текущую папку в путь
+sys.path.insert(0, os.getcwd())
+
+# Проверяем, что файл существует
+if not os.path.exists('tests.py'):
+    print('❌ Файл tests.py не найден')
+    sys.exit(1)
+
+# Загружаем тестовый модуль
+print('Импортируем tests.py...')
+exec(open('tests.py').read())
+
+# Запускаем pytest
+print('Запускаем тесты...')
+sys.exit(pytest.main(['-v', 'tests.py']))
+        "
