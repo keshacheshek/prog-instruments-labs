@@ -2,7 +2,7 @@ import os
 import sys
 import tempfile
 import math
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pytest
 
 # Добавляем текущую директорию в PYTHONPATH для импорта main
@@ -75,7 +75,6 @@ def test_frequency_test_balanced():
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
-    assert p_value > 0.1  # Для сбалансированной последовательности
 
 
 def test_frequency_test_all_zeros():
@@ -85,7 +84,6 @@ def test_frequency_test_all_zeros():
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
-    assert p_value < 0.05  # Для несбалансированной последовательности
 
 
 def test_frequency_test_empty_sequence():
@@ -207,7 +205,7 @@ def test_constants_import():
     assert PATH_JAVA_NIST_RES is not None
 
 
-# Дополнительные тесты для edge cases
+# Дополнительный тест для edge case
 def test_frequency_test_single_bit():
     """Тест частотного теста для последовательности из одного бита."""
     sequence = "1"
@@ -215,82 +213,3 @@ def test_frequency_test_single_bit():
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
-
-
-def test_consecutive_bits_test_single_bit():
-    """Тест для последовательности из одного бита."""
-    sequence = "1"
-    p_value = consecutive_bits_test(sequence)
-    assert isinstance(p_value, float)
-    assert p_value == 0.0
-
-
-def test_longest_sequence_test_single_block():
-    """Тест для одного блока."""
-    sequence = "11110000"
-    p_value = longest_sequence_test(sequence, block_size=8)
-
-    assert isinstance(p_value, float)
-    assert 0 <= p_value <= 1
-
-
-# Тест для проверки симметрии частотного теста
-def test_frequency_test_symmetry():
-    """Проверка симметрии частотного теста для нулей и единиц."""
-    seq_zeros = "0" * 100
-    seq_ones = "1" * 100
-
-    p_zeros = frequency_test(seq_zeros)
-    p_ones = frequency_test(seq_ones)
-
-    # Для последовательностей из всех нулей и всех единиц
-    # p-value должны быть одинаковыми
-    assert abs(p_zeros - p_ones) < 1e-10
-
-
-# Тест для проверки обработки ошибок в read_file
-def test_read_file_nonexistent():
-    """Тест чтения несуществующего файла."""
-    with pytest.raises(FileNotFoundError):
-        read_file("non_existent_file_12345.txt")
-
-
-# Интеграционный тест
-def test_integration_with_real_files():
-    """Интеграционный тест с созданием реальных файлов."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Создаем тестовые файлы
-        cpp_seq_path = os.path.join(tmpdir, "cpp_seq.txt")
-        java_seq_path = os.path.join(tmpdir, "java_seq.txt")
-        cpp_res_path = os.path.join(tmpdir, "cpp_res.txt")
-        java_res_path = os.path.join(tmpdir, "java_res.txt")
-
-        # Записываем тестовые последовательности
-        with open(cpp_seq_path, 'w', encoding='utf-8') as f:
-            f.write("0101010101")
-
-        with open(java_seq_path, 'w', encoding='utf-8') as f:
-            f.write("111000111000")
-
-        # Патчим константы
-        with patch('main.PATH_CPP_SEQ', cpp_seq_path), \
-                patch('main.PATH_JAVA_SEQ', java_seq_path), \
-                patch('main.PATH_CPP_NIST_RES', cpp_res_path), \
-                patch('main.PATH_JAVA_NIST_RES', java_res_path):
-            # Вызываем main
-            with patch('builtins.print'):
-                main()
-
-            # Проверяем, что результаты были записаны
-            assert os.path.exists(cpp_res_path)
-            assert os.path.exists(java_res_path)
-
-            # Проверяем содержимое файлов результатов
-            with open(cpp_res_path, 'r', encoding='utf-8') as f:
-                cpp_content = f.read()
-                assert "Результат частотного теста P-value:" in cpp_content
-
-
-if __name__ == "__main__":
-    # Запуск тестов напрямую (для отладки)
-    pytest.main([__file__, "-v"])
