@@ -7,6 +7,12 @@ import time
 from copy import copy, deepcopy
 import itertools
 import sys
+import cProfile
+import pstats
+import io
+from memory_profiler import profile
+import tracemalloc
+import matplotlib.pyplot as plt
 
 
 class Point:
@@ -1003,6 +1009,133 @@ def bruteForceCover(x, y, circles, scaleFactor):
     return
 
 
+# Новые функции для профилирования
+def run_cprofile(func, *args, **kwargs):
+    """Запускает функцию под профилировщиком cProfile"""
+    pr = cProfile.Profile()
+    pr.enable()
+
+    result = func(*args, **kwargs)
+
+    pr.disable()
+
+    # Сохраняем результаты профилирования
+    s = io.StringIO()
+    ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+    ps.print_stats(20)  # Топ 20 функций
+
+    print("\n" + "=" * 80)
+    print("cProfile Results (Top 20 functions by cumulative time):")
+    print("=" * 80)
+    print(s.getvalue())
+
+    # Сохраняем в файл
+    with open('profiling_results.txt', 'w') as f:
+        f.write(s.getvalue())
+
+    return result
+
+
+@profile
+def profile_memory_planeSweepCover(x, y, circles, animation, scaleFactor):
+    """Обертка для профилирования памяти"""
+    return planeSweepCover(x, y, circles, animation, scaleFactor)
+
+
+@profile
+def profile_memory_planeSweepPacking(x, y, circles, animation, scaleFactor):
+    """Обертка для профилирования памяти"""
+    return planeSweepPacking(x, y, circles, animation, scaleFactor)
+
+
+def profile_compute_intersection_heavy(circles, scaleFactor=50, iterations=1000):
+    """Тест производительности для computeIntersection"""
+    print("\n" + "=" * 80)
+    print("Профилирование computeIntersection (тяжелый тест):")
+    print("=" * 80)
+
+    pr = cProfile.Profile()
+    pr.enable()
+
+    # Имитируем нагрузку - много вызовов computeIntersection
+    for _ in range(iterations):
+        for i in range(len(circles)):
+            for j in range(i + 1, len(circles)):
+                computeIntersection(circles[i], circles[j], scaleFactor)
+
+    pr.disable()
+
+    s = io.StringIO()
+    ps = pstats.Stats(pr, stream=s).sort_stats('time')
+    ps.print_stats(10)
+
+    print(s.getvalue())
+
+
+def measure_performance_baseline(x, y, circles, scaleFactor):
+    """Измерение базовой производительности всех алгоритмов"""
+    print("\n" + "=" * 80)
+    print("БАЗОВЫЕ ИЗМЕРЕНИЯ ПРОИЗВОДИТЕЛЬНОСТИ")
+    print("=" * 80)
+
+    # Трассировка памяти
+    tracemalloc.start()
+
+    results = {}
+
+    # 1. BruteForce Packing
+    print("\n1. BruteForce Packing:")
+    start = time.time()
+    bruteForcePacking(x, y, circles, scaleFactor)
+    results['bruteForcePacking'] = time.time() - start
+    print(f"Время выполнения: {results['bruteForcePacking']:.4f} сек")
+
+    # 2. Plane Sweep Packing
+    print("\n2. Plane Sweep Packing:")
+    start = time.time()
+    planeSweepPacking(x, y, circles, animation=False, scaleFactor=scaleFactor)
+    results['planeSweepPacking'] = time.time() - start
+    print(f"Время выполнения: {results['planeSweepPacking']:.4f} сек")
+
+    # 3. Plane Sweep Cover
+    print("\n3. Plane Sweep Cover:")
+    start = time.time()
+    planeSweepCover(x, y, circles, animation=False, scaleFactor=scaleFactor)
+    results['planeSweepCover'] = time.time() - start
+    print(f"Время выполнения: {results['planeSweepCover']:.4f} сек")
+
+    # Анализ использования памяти
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    print(f"\nИспользование памяти:")
+    print(f"Текущее: {current / 10 ** 6:.2f} MB")
+    print(f"Пиковое: {peak / 10 ** 6:.2f} MB")
+
+    # Визуализация результатов
+    if len(results) > 0:
+        plt.figure(figsize=(10, 6))
+        algorithms = list(results.keys())
+        times = list(results.values())
+
+        bars = plt.bar(algorithms, times, color=['red', 'green', 'blue'])
+        plt.xlabel('Алгоритм')
+        plt.ylabel('Время выполнения (сек)')
+        plt.title('Сравнение производительности алгоритмов')
+        plt.xticks(rotation=45)
+
+        # Добавляем значения на столбцы
+        for bar, time_val in zip(bars, times):
+            plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                     f'{time_val:.4f}', ha='center', va='bottom')
+
+        plt.tight_layout()
+        plt.savefig('performance_baseline.png')
+        print("\nГрафик сохранен как 'performance_baseline.png'")
+
+    return results
+
+
 def main():
     # Read different examples of input
     # file1 = open('input\ExampleInput', 'r')
@@ -1023,29 +1156,29 @@ def main():
     # This is only to see what happens, not plane sweep algorithm applied here
     # draw(x,y,circles, scaleFactor)
 
-    start = time.time()
-    # planeSweepPacking(x, y, circles, animation = False, scaleFactor=scaleFactor)
-    planeSweepCover(x, y, circles, animation=False, scaleFactor=scaleFactor)
-    end1 = time.time() - start
-    print(f"\nTime for plane sweep: {end1}")
+    print("\n" + "=" * 80)
+    print("ЛАБОРАТОРНАЯ РАБОТА: ПРОФАЙЛИНГ И ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ")
+    print("=" * 80)
 
-    '''
-    # BRUTEFORCE TEST
-    print(f"\n\nBruteForce Packing")
-    start = time.time()
-    bruteForcePacking(x, y, circles, scaleFactor=scaleFactor)
-    end1 = time.time() - start  
-    print(f"\nTime for bruteForcePacking: {end1}")
-    '''
+    # Запускаем базовые измерения производительности
+    baseline_results = measure_performance_baseline(x, y, circles, scaleFactor)
 
-    '''
-    # SOMETHING TO FIX
-    print(f"\n\nBrute Force Cover")
-    start = time.time()
-    bruteForceCover(x, y, circles, scaleFactor=scaleFactor)
-    end1 = time.time() - start  
-    print(f"\nTime for Brute Force Cover: {end1}")
-    '''
+    # Запускаем детальное профилирование CPU
+    print("\n" + "=" * 80)
+    print("ДЕТАЛЬНОЕ ПРОФИЛИРОВАНИЕ CPU (cProfile):")
+    print("=" * 80)
+
+    print("\nПрофилирование planeSweepCover с помощью cProfile:")
+    run_cprofile(planeSweepCover, x, y, circles, animation=False, scaleFactor=scaleFactor)
+
+    # Профилирование computeIntersection
+    profile_compute_intersection_heavy(circles, scaleFactor, iterations=100)
+
+    # Профилирование памяти (опционально, раскомментировать при необходимости)
+    # print("\n" + "="*80)
+    # print("ПРОФИЛИРОВАНИЕ ПАМЯТИ:")
+    # print("="*80)
+    # profile_memory_planeSweepCover(x, y, circles, animation=False, scaleFactor=scaleFactor)
 
     try:
         sys.exit()
