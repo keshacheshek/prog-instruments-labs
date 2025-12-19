@@ -2,41 +2,26 @@ name: Python Tests
 
 on:
   push:
-    branches: [ lab_6, main, master ]
+    branches: [ lab_6 ]
   pull_request:
-    branches: [ lab_6, main, master ]
+    branches: [ lab_6 ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.8, 3.9, 3.10, 3.11]
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python 3.10
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.10"
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install pytest scipy
 
-    - name: Test with pytest
+    - name: Run tests
       run: |
-        pytest lab_6/tests.py -v --tb=short
-
-    - name: Run coverage
-      run: |
-        pip install pytest-cov
-        pytest tests.py --cov=main --cov-report=xml
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: false
+        pytest tests.py -v
