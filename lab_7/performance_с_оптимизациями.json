@@ -1,0 +1,19 @@
+{
+  "bruteForcePacking": 0.0007122999995772261,
+  "bruteForcePacking_result": true,
+  "planeSweepPacking_optimized": 0.00043989999903715216,
+  "planeSweepPacking_result": true,
+  "planeSweepCover_optimized": 0.0012578999994730111,
+  "planeSweepCover_result": true,
+  "computeIntersection_cached": 0.010521500000322703,
+  "py_list_create_1000": 0.0007284999992407393,
+  "np_array_create_1000": 1.3500000932253897e-05,
+  "py_list_create_10000": 0.007929700001113815,
+  "np_array_create_10000": 2.6300000172341242e-05,
+  "py_list_create_100000": 0.07938350000040373,
+  "np_array_create_100000": 0.00016069999765022658,
+  "py_square_100k": 0.09305750000203261,
+  "np_square_100k": 0.00016630000027362257,
+  "memory_current_mb": 0.630792,
+  "memory_peak_mb": 8.232192
+}
