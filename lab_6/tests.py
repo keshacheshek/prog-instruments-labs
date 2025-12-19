@@ -1,7 +1,7 @@
 import os
 import sys
 import tempfile
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, MagicMock
 import math
 import pytest
 
@@ -260,3 +260,150 @@ def test_longest_sequence_test_empty_sequence():
     # Функция должна вернуть число (возможно, NaN или Inf при делении на ноль)
     # Проверяем, что это float
     assert isinstance(p_value, float)
+
+
+# Тесты для функции main с использованием моков
+@patch('main.read_file')
+@patch('main.frequency_test')
+@patch('main.consecutive_bits_test')
+@patch('main.longest_sequence_test')
+@patch('main.write_file')
+def test_main_normal_execution(mock_write_file, mock_longest_sequence_test,
+                               mock_consecutive_bits_test, mock_frequency_test,
+                               mock_read_file):
+    """Тест основной функции main с моками всех зависимостей."""
+    # Настраиваем моки
+    mock_read_file.side_effect = ["cpp_sequence", "java_sequence"]
+    mock_frequency_test.side_effect = [0.123, 0.456]
+    mock_consecutive_bits_test.side_effect = [0.789, 0.012]
+    mock_longest_sequence_test.side_effect = [0.345, 0.678]
+
+    # Вызываем main
+    main()
+
+    # Проверяем вызовы read_file
+    assert mock_read_file.call_count == 2
+    mock_read_file.assert_any_call('cpp_seq.txt')  # из constants.PATH_CPP_SEQ
+    mock_read_file.assert_any_call('java_seq.txt')  # из constants.PATH_JAVA_SEQ
+
+    # Проверяем вызовы тестовых функций для C++
+    mock_frequency_test.assert_any_call("cpp_sequence")
+    mock_consecutive_bits_test.assert_any_call("cpp_sequence")
+    mock_longest_sequence_test.assert_any_call("cpp_sequence")
+
+    # Проверяем вызовы тестовых функций для Java
+    mock_frequency_test.assert_any_call("java_sequence")
+    mock_consecutive_bits_test.assert_any_call("java_sequence")
+    mock_longest_sequence_test.assert_any_call("java_sequence")
+
+    # Проверяем вызовы write_file
+    assert mock_write_file.call_count == 2
+    mock_write_file.assert_any_call('cpp_res.txt', 0.123, 0.789, 0.345)  # из constants.PATH_CPP_NIST_RES
+    mock_write_file.assert_any_call('java_res.txt', 0.456, 0.012, 0.678)  # из constants.PATH_JAVA_NIST_RES
+
+
+@patch('main.read_file')
+@patch('main.frequency_test')
+@patch('main.consecutive_bits_test')
+@patch('main.longest_sequence_test')
+@patch('main.write_file')
+def test_main_with_io_error(mock_write_file, mock_longest_sequence_test,
+                            mock_consecutive_bits_test, mock_frequency_test,
+                            mock_read_file):
+    """Тест main при возникновении IOError при записи."""
+    # Настраиваем моки
+    mock_read_file.side_effect = ["cpp_sequence", "java_sequence"]
+    mock_frequency_test.side_effect = [0.123, 0.456]
+    mock_consecutive_bits_test.side_effect = [0.789, 0.012]
+    mock_longest_sequence_test.side_effect = [0.345, 0.678]
+
+    # Настраиваем write_file для вызова исключения
+    mock_write_file.side_effect = IOError("Не удалось записать файл")
+
+    # Захватываем вывод в консоль
+    with patch('builtins.print') as mock_print:
+        main()
+
+        # Проверяем, что была попытка напечатать сообщение об ошибке
+        mock_print.assert_any_call("Ошибка: Не удалось записать данные в файл")
+
+
+@patch('main.read_file')
+@patch('main.frequency_test')
+@patch('main.consecutive_bits_test')
+@patch('main.longest_sequence_test')
+@patch('main.write_file')
+def test_main_with_general_exception(mock_write_file, mock_longest_sequence_test,
+                                     mock_consecutive_bits_test, mock_frequency_test,
+                                     mock_read_file):
+    """Тест main при возникновении общего исключения."""
+    # Настраиваем моки
+    mock_read_file.side_effect = ["cpp_sequence", "java_sequence"]
+    mock_frequency_test.side_effect = [0.123, 0.456]
+    mock_consecutive_bits_test.side_effect = [0.789, 0.012]
+    mock_longest_sequence_test.side_effect = [0.345, 0.678]
+
+    # Настраиваем write_file для вызова исключения
+    mock_write_file.side_effect = Exception("Неизвестная ошибка")
+
+    # Захватываем вывод в консоль
+    with patch('builtins.print') as mock_print:
+        main()
+
+        # Проверяем, что была попытка напечатать сообщение об ошибке
+        mock_print.assert_any_call("Произошла ошибка: Неизвестная ошибка")
+
+
+@patch('main.read_file')
+@patch('main.frequency_test')
+@patch('main.consecutive_bits_test')
+@patch('main.longest_sequence_test')
+@patch('main.write_file')
+@patch('builtins.print')
+def test_main_output_print_statements(mock_print, mock_write_file, mock_longest_sequence_test,
+                                      mock_consecutive_bits_test, mock_frequency_test,
+                                      mock_read_file):
+    """Тест проверки вывода в консоль из функции main."""
+    # Настраиваем моки
+    mock_read_file.side_effect = ["cpp_sequence", "java_sequence"]
+    mock_frequency_test.side_effect = [0.123456, 0.789012]
+    mock_consecutive_bits_test.side_effect = [0.345678, 0.901234]
+    mock_longest_sequence_test.side_effect = [0.567890, 0.123456]
+
+    # Вызываем main
+    main()
+
+    # Проверяем, что были напечатаны все ожидаемые сообщения
+    mock_print.assert_any_call("C++ Sequence:")
+    mock_print.assert_any_call("Frequency test P-value: 0.123456")
+    mock_print.assert_any_call("Identical consecutive bits P-value: 0.345678")
+    mock_print.assert_any_call("Longest sequence of units in a block P-value: 0.567890")
+
+    mock_print.assert_any_call("\nJava Sequence:")
+    mock_print.assert_any_call("Frequency Test P-value: 0.789012")
+    mock_print.assert_any_call("Identical consecutive bits P-value: 0.901234")
+    mock_print.assert_any_call("Longest sequence of units in a block P-value: 0.123456")
+
+    # Проверяем финальное сообщение
+    mock_print.assert_any_call("Анализ завершен. Результаты сохранены в файлы 'cpp_res.txt' и 'java_res.txt'")
+
+
+def test_main_direct_call():
+    """Тест прямого вызова main (интеграционный тест)."""
+    # Здесь мы используем контекстный менеджер для патчинга констант
+    # чтобы избежать зависимостей от реальных файлов
+    with patch('main.PATH_CPP_SEQ', 'test_cpp.txt'), \
+            patch('main.PATH_JAVA_SEQ', 'test_java.txt'), \
+            patch('main.PATH_CPP_NIST_RES', 'test_cpp_res.txt'), \
+            patch('main.PATH_JAVA_NIST_RES', 'test_java_res.txt'), \
+            patch('main.read_file') as mock_read_file, \
+            patch('main.write_file') as mock_write_file:
+        # Настраиваем моки
+        mock_read_file.side_effect = ["0101010101", "111000111000"]
+
+        # Вызываем main
+        main()
+
+        # Проверяем вызовы
+        assert mock_read_file.call_count == 2
+        assert mock_write_file.call_count == 2
