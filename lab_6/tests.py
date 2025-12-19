@@ -3,6 +3,7 @@ import sys
 import tempfile
 from unittest.mock import patch, mock_open
 import math
+import pytest
 
 # Добавляем путь к исходному коду в PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -183,4 +184,79 @@ def test_consecutive_bits_test_edge_cases():
     # Последовательность длиной 1
     sequence = "1"
     p_value = consecutive_bits_test(sequence)
+    assert isinstance(p_value, float)
+
+
+# Параметризованные тесты для longest_sequence_test
+@pytest.mark.parametrize("sequence,block_size,expected_range", [
+    # Короткая последовательность с маленькими блоками
+    ("11110000", 4, (0, 1)),  # 2 блока по 4 бита
+    ("10101010", 4, (0, 1)),  # чередующиеся биты
+    # Длинная последовательность
+    ("1111111100000000", 8, (0, 1)),  # 2 блока по 8 бит
+    ("1" * 16, 8, (0, 1)),  # все единицы
+    ("0" * 16, 8, (0, 1)),  # все нули
+])
+def test_longest_sequence_test_parametrized(sequence, block_size, expected_range):
+    """Параметризованный тест для longest_sequence_test."""
+    p_value = longest_sequence_test(sequence, block_size)
+
+    assert isinstance(p_value, float)
+    assert expected_range[0] <= p_value <= expected_range[1]
+
+
+def test_longest_sequence_test_basic():
+    """Базовый тест для longest_sequence_test."""
+    sequence = "1100110011001100"  # 16 бит
+    p_value = longest_sequence_test(sequence, block_size=8)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_longest_sequence_test_single_block():
+    """Тест для одного блока."""
+    sequence = "11110000"  # 8 бит - ровно один блок
+    p_value = longest_sequence_test(sequence, block_size=8)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_longest_sequence_test_multiple_blocks():
+    """Тест для нескольких блоков."""
+    sequence = "11111111000000001111111100000000"  # 32 бита = 4 блока по 8
+    p_value = longest_sequence_test(sequence, block_size=8)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_longest_sequence_test_long_runs():
+    """Тест с длинными последовательностями единиц."""
+    sequence = "111111110000111111110000"  # 24 бита
+    p_value = longest_sequence_test(sequence, block_size=8)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_longest_sequence_test_different_block_sizes():
+    """Тест с разными размерами блоков."""
+    sequence = "1" * 32  # 32 единицы
+
+    for block_size in [4, 8, 16]:
+        p_value = longest_sequence_test(sequence, block_size)
+
+        assert isinstance(p_value, float)
+        assert 0 <= p_value <= 1
+
+
+def test_longest_sequence_test_empty_sequence():
+    """Тест с пустой последовательностью."""
+    sequence = ""
+    p_value = longest_sequence_test(sequence, block_size=8)
+
+    # Функция должна вернуть число (возможно, NaN или Inf при делении на ноль)
+    # Проверяем, что это float
     assert isinstance(p_value, float)
