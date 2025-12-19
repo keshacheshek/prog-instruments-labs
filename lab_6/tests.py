@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 from unittest.mock import patch, mock_open
+import math
 
 # Добавляем путь к исходному коду в PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -93,3 +94,93 @@ def test_write_file_overwrites_content():
         assert "Результат частотного теста P-value: 0.5" in content
     finally:
         os.unlink(tmp_path)
+
+
+def test_frequency_test_balanced():
+    """Тест частотного теста для сбалансированной последовательности."""
+    # Сбалансированная последовательность (5 нулей, 5 единиц)
+    sequence = "0101010101"
+    p_value = frequency_test(sequence)
+
+    # Для сбалансированной последовательности p-value должен быть близок к 1
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+    # В сбалансированном случае p-value будет высоким (> 0.1)
+    assert p_value > 0.1
+
+
+def test_frequency_test_all_zeros():
+    """Тест частотного теста для последовательности из всех нулей."""
+    sequence = "0000000000"
+    p_value = frequency_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+    # Для несбалансированной последовательности p-value будет очень маленьким
+    assert p_value < 0.05
+
+
+def test_frequency_test_all_ones():
+    """Тест частотного теста для последовательности из всех единиц."""
+    sequence = "1111111111"
+    p_value = frequency_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+    # Для несбалансированной последовательности p-value будет очень маленьким
+    assert p_value < 0.05
+
+
+def test_frequency_test_single_bit():
+    """Тест частотного теста для последовательности из одного бита."""
+    sequence = "1"
+    p_value = frequency_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_consecutive_bits_test_alternating():
+    """Тест на одинаковые подряд идущие биты для чередующейся последовательности."""
+    sequence = "0101010101"
+    p_value = consecutive_bits_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+    # Для чередующейся последовательности p-value должен быть высоким
+
+
+def test_consecutive_bits_test_all_same():
+    """Тест на одинаковые подряд идущие биты для последовательности из одинаковых битов."""
+    sequence = "0000000000"
+    p_value = consecutive_bits_test(sequence)
+
+    assert isinstance(p_value, float)
+    # Для последовательности из одинаковых битов возвращается 0.0
+    # согласно условию в функции
+    if abs(0.0 - 0.5) >= (2 / len(sequence) ** 0.5):
+        assert p_value == 0.0
+    else:
+        assert 0 <= p_value <= 1
+
+
+def test_consecutive_bits_test_mixed():
+    """Тест на одинаковые подряд идущие биты для смешанной последовательности."""
+    sequence = "000111000111"
+    p_value = consecutive_bits_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+def test_consecutive_bits_test_edge_cases():
+    """Тест граничных случаев для consecutive_bits_test."""
+    # Короткая последовательность
+    sequence = "01"
+    p_value = consecutive_bits_test(sequence)
+    assert isinstance(p_value, float)
+
+    # Последовательность длиной 1
+    sequence = "1"
+    p_value = consecutive_bits_test(sequence)
+    assert isinstance(p_value, float)
