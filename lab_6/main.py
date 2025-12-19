@@ -33,12 +33,20 @@ def frequency_test(sequence: str) -> float:
     :param sequence: Исследуемая последовательность
     :return: P-значение
     """
+    if len(sequence) == 0:
+        return 1.0  # или 0.0, в зависимости от логики
+
     sn = 0
     for i in sequence:
         if i == '0':
             sn -= 1
         if i == '1':
             sn += 1
+
+    # Проверка деления на ноль
+    if len(sequence) == 0:
+        return 1.0
+
     sn = sn / (len(sequence) ** 0.5)
 
     return math.erfc(abs(sn / (2 ** 0.5)))
@@ -50,6 +58,8 @@ def consecutive_bits_test(sequence: str) -> float:
     :param sequence: Исследуемая последовательность
     :return: P-значение
     """
+    if len(sequence) == 0:
+        return 1.0
 
     sum1 = 0
     for i in sequence:
@@ -60,12 +70,20 @@ def consecutive_bits_test(sequence: str) -> float:
     if abs(z - 0.5) >= (2 / len(sequence) ** 0.5):
         return 0.0
 
+    # Защита от деления на ноль
+    if z == 0 or z == 1:
+        return 0.0
+
     vn = 0
     for i in range(len(sequence) - 1):
         if sequence[i] != sequence[i + 1]:
             vn += 1
 
-    return math.erfc(abs(vn - 2 * len(sequence) * z * (1 - z)) / (2 * (2 * len(sequence)) ** 0.5 * z * (1 - z)))
+    denominator = 2 * (2 * len(sequence)) ** 0.5 * z * (1 - z)
+    if denominator == 0:
+        return 0.0
+
+    return math.erfc(abs(vn - 2 * len(sequence) * z * (1 - z)) / denominator)
 
 
 def longest_sequence_test(sequence, block_size=8) -> float:
@@ -75,13 +93,14 @@ def longest_sequence_test(sequence, block_size=8) -> float:
     :param block_size: Длина блока
     :return: P-значение
     """
+    if len(sequence) == 0 or block_size == 0:
+        return 1.0
+
     n = len(sequence)
     v = [0, 0, 0, 0]
     block_i = 0
     max_run = 1
     curr_run = 1
-
-    print(sequence)
 
     for i in range(len(sequence)):
         block_i += 1
@@ -102,18 +121,33 @@ def longest_sequence_test(sequence, block_size=8) -> float:
             curr_run = 1
             continue
 
-        if sequence[i] == '1':
-            if sequence[i] == sequence[i+1]:
+        if i < len(sequence) - 1 and sequence[i] == '1':
+            if sequence[i] == sequence[i + 1]:
                 curr_run += 1
 
         else:
             max_run = max(max_run, curr_run)
             curr_run = 1
 
+    # Обработка последнего блока
+    if block_i > 0:
+        max_run = max(max_run, curr_run)
+        if max_run <= 1:
+            v[0] += 1
+        elif max_run == 2:
+            v[1] += 1
+        elif max_run == 3:
+            v[2] += 1
+        else:
+            v[3] += 1
+
     chi_square = 0
     blocks_n = len(sequence) / block_size
+
+    # Защита от деления на ноль
     for i in range(len(v)):
-        chi_square += (v[i] - blocks_n * PI[i]) ** 2 / (blocks_n * PI[i])
+        if PI[i] > 0 and blocks_n > 0:  # Проверка перед делением
+            chi_square += (v[i] - blocks_n * PI[i]) ** 2 / (blocks_n * PI[i])
 
     return scipy.special.gammainc(1.5, chi_square / 2)
 
