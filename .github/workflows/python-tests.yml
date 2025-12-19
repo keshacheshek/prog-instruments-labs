@@ -2,9 +2,9 @@ name: Python Tests
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ lab_6, main, master ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ lab_6, main, master ]
 
 jobs:
   test:
@@ -28,12 +28,12 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest tests/ -v --tb=short
+        pytest lab_6/tests.py -v --tb=short
 
     - name: Run coverage
       run: |
         pip install pytest-cov
-        pytest tests/ --cov=main --cov-report=xml
+        pytest tests.py --cov=main --cov-report=xml
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
