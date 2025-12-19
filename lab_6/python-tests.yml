@@ -22,26 +22,19 @@ jobs:
       run: |
         pip install pytest
 
-    - name: Run tests
+    - name: Create test files
       run: |
-        echo "Текущая директория: $(pwd)"
-        echo "Содержимое:"
-        ls -la
-        
-        # Проверяем структуру проекта
-        if [ -d "lab_6" ]; then
-          echo "Переходим в lab_6"
-          cd lab_6
-          echo "Содержимое lab_6:"
-          ls -la
-        fi
-        
         # Создаем необходимые файлы для тестов
         echo "0101010101" > cpp_seq.txt
         echo "111000111000" > java_seq.txt
-        
+
+    - name: Run tests
+      run: |
         echo "Запуск тестов..."
-        python -m pytest tests.py -v
-        
+        python -m pytest tests/ -v
+
+    - name: Check coverage
+      run: |
         echo "Проверка покрытия..."
-        python -m pytest tests.py --cov=main --cov-report=term-missing
+        python -m coverage run -m pytest tests/
+        python -m coverage report
