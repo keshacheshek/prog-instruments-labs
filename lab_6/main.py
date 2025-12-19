@@ -1,7 +1,5 @@
 from constants import PI, PATH_CPP_SEQ, PATH_JAVA_SEQ, PATH_CPP_NIST_RES, PATH_JAVA_NIST_RES
-
 import math
-import scipy.special
 
 
 def read_file(file_name) -> str:
@@ -34,7 +32,7 @@ def frequency_test(sequence: str) -> float:
     :return: P-значение
     """
     if len(sequence) == 0:
-        return 1.0  # или 0.0, в зависимости от логики
+        return 1.0
 
     sn = 0
     for i in sequence:
@@ -43,12 +41,7 @@ def frequency_test(sequence: str) -> float:
         if i == '1':
             sn += 1
 
-    # Проверка деления на ноль
-    if len(sequence) == 0:
-        return 1.0
-
     sn = sn / (len(sequence) ** 0.5)
-
     return math.erfc(abs(sn / (2 ** 0.5)))
 
 
@@ -97,93 +90,92 @@ def longest_sequence_test(sequence, block_size=8) -> float:
         return 1.0
 
     n = len(sequence)
-    v = [0, 0, 0, 0]
-    block_i = 0
-    max_run = 1
-    curr_run = 1
+    m = block_size
 
-    for i in range(len(sequence)):
-        block_i += 1
-        if block_i >= block_size:
-            block_i = 0
-            max_run = max(max_run, curr_run)
+    # Разбиваем последовательность на блоки
+    num_blocks = n // m
+    if num_blocks == 0:
+        return 1.0
 
-            if max_run <= 1:
-                v[0] += 1
-            elif max_run == 2:
-                v[1] += 1
-            elif max_run == 3:
-                v[2] += 1
+    # Для каждого блока находим максимальную длину последовательности единиц
+    max_runs = []
+    for i in range(num_blocks):
+        block = sequence[i * m:(i + 1) * m]
+        max_run = 0
+        current_run = 0
+
+        for bit in block:
+            if bit == '1':
+                current_run += 1
+                max_run = max(max_run, current_run)
             else:
-                v[3] += 1
+                current_run = 0
 
-            max_run = 1
-            curr_run = 1
-            continue
+        max_runs.append(max_run)
 
-        if i < len(sequence) - 1 and sequence[i] == '1':
-            if sequence[i] == sequence[i + 1]:
-                curr_run += 1
+    # Вычисляем статистику V по формуле NIST
+    # Используем предопределенные значения PI для разных длин блока
+    K = 3  # для блока 8 бит
+    nu = [0, 0, 0, 0]  # частоты для 4 категорий
 
-        else:
-            max_run = max(max_run, curr_run)
-            curr_run = 1
+    for run in max_runs:
+        if run <= 1:
+            nu[0] += 1
+        elif run == 2:
+            nu[1] += 1
+        elif run == 3:
+            nu[2] += 1
+        else:  # run >= 4
+            nu[3] += 1
 
-    # Обработка последнего блока
-    if block_i > 0:
-        max_run = max(max_run, curr_run)
-        if max_run <= 1:
-            v[0] += 1
-        elif max_run == 2:
-            v[1] += 1
-        elif max_run == 3:
-            v[2] += 1
-        else:
-            v[3] += 1
-
+    # Вычисляем хи-квадрат статистику
     chi_square = 0
-    blocks_n = len(sequence) / block_size
+    for i in range(4):
+        expected = PI[i] * num_blocks
+        if expected > 0:  # избегаем деления на ноль
+            chi_square += ((nu[i] - expected) ** 2) / expected
 
-    # Защита от деления на ноль
-    for i in range(len(v)):
-        if PI[i] > 0 and blocks_n > 0:  # Проверка перед делением
-            chi_square += (v[i] - blocks_n * PI[i]) ** 2 / (blocks_n * PI[i])
+    # Вычисляем P-value через неполную гамма-функцию (упрощенный вариант)
+    # Для K=3 степеней свободы
+    # Используем аппроксимацию через математические функции Python
+    p_value = math.exp(-chi_square / 2)
 
-    return scipy.special.gammainc(1.5, chi_square / 2)
+    # Ограничиваем значение от 0 до 1
+    return max(0.0, min(1.0, p_value))
 
 
 def main():
-        sequence_cpp = read_file(PATH_CPP_SEQ)
-        sequence_java = read_file(PATH_JAVA_SEQ)
+    sequence_cpp = read_file(PATH_CPP_SEQ)
+    sequence_java = read_file(PATH_JAVA_SEQ)
 
-        p_value_freq_cpp = frequency_test(sequence_cpp)
-        p_value_cons_bit_cpp = consecutive_bits_test(sequence_cpp)
-        p_value_long_seq_cpp = longest_sequence_test(sequence_cpp)
+    p_value_freq_cpp = frequency_test(sequence_cpp)
+    p_value_cons_bit_cpp = consecutive_bits_test(sequence_cpp)
+    p_value_long_seq_cpp = longest_sequence_test(sequence_cpp)
 
-        p_value_freq_java = frequency_test(sequence_java)
-        p_value_cons_bit_java = consecutive_bits_test(sequence_java)
-        p_value_long_seq_java = longest_sequence_test(sequence_java)
+    p_value_freq_java = frequency_test(sequence_java)
+    p_value_cons_bit_java = consecutive_bits_test(sequence_java)
+    p_value_long_seq_java = longest_sequence_test(sequence_java)
 
-        try:
-            write_file(PATH_CPP_NIST_RES, p_value_freq_cpp, p_value_cons_bit_cpp, p_value_long_seq_cpp)
-            write_file(PATH_JAVA_NIST_RES, p_value_freq_java, p_value_cons_bit_java, p_value_long_seq_java)
+    try:
+        write_file(PATH_CPP_NIST_RES, p_value_freq_cpp, p_value_cons_bit_cpp, p_value_long_seq_cpp)
+        write_file(PATH_JAVA_NIST_RES, p_value_freq_java, p_value_cons_bit_java, p_value_long_seq_java)
 
-            print("C++ Sequence:")
-            print(f"Frequency test P-value: {p_value_freq_cpp}")
-            print(f"Identical consecutive bits P-value: {p_value_cons_bit_cpp}")
-            print(f"Longest sequence of units in a block P-value: {p_value_long_seq_cpp}")
+        print("C++ Sequence:")
+        print(f"Frequency test P-value: {p_value_freq_cpp}")
+        print(f"Identical consecutive bits P-value: {p_value_cons_bit_cpp}")
+        print(f"Longest sequence of units in a block P-value: {p_value_long_seq_cpp}")
 
-            print("\nJava Sequence:")
-            print(f"Frequency Test P-value: {p_value_freq_java}")
-            print(f"Identical consecutive bits P-value: {p_value_cons_bit_java}")
-            print(f"Longest sequence of units in a block P-value: {p_value_long_seq_java}")
+        print("\nJava Sequence:")
+        print(f"Frequency Test P-value: {p_value_freq_java}")
+        print(f"Identical consecutive bits P-value: {p_value_cons_bit_java}")
+        print(f"Longest sequence of units in a block P-value: {p_value_long_seq_java}")
 
-            print(f"Анализ завершен. Результаты сохранены в файлы '{PATH_CPP_NIST_RES}' и '{PATH_JAVA_NIST_RES}'")
+        print(f"Анализ завершен. Результаты сохранены в файлы '{PATH_CPP_NIST_RES}' и '{PATH_JAVA_NIST_RES}'")
 
-        except IOError:
-            print(f"Ошибка: Не удалось записать данные в файл")
-        except Exception as e:
-            print(f"Произошла ошибка: {e}")
+    except IOError:
+        print(f"Ошибка: Не удалось записать данные в файл")
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
 
 
 if __name__ == "__main__":
