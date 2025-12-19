@@ -4,6 +4,7 @@ import tempfile
 from unittest.mock import patch, mock_open, MagicMock
 import math
 import pytest
+import scipy.special
 
 # Добавляем путь к исходному коду в PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -32,6 +33,19 @@ def test_read_file_empty():
 
     try:
         assert read_file(tmp_path) == ""
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_read_file_with_special_characters():
+    """Тест чтения файла со специальными символами."""
+    content = "0101\n0101\t01"
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        assert read_file(tmp_path) == content
     finally:
         os.unlink(tmp_path)
 
@@ -141,6 +155,17 @@ def test_frequency_test_single_bit():
     assert 0 <= p_value <= 1
 
 
+def test_frequency_test_large_sequence():
+    """Тест частотного теста для большой последовательности."""
+    sequence = "01" * 1000  # 2000 бит, сбалансированная
+    p_value = frequency_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+    # Для большой сбалансированной последовательности p-value должен быть высоким
+    assert p_value > 0.1
+
+
 def test_consecutive_bits_test_alternating():
     """Тест на одинаковые подряд идущие биты для чередующейся последовательности."""
     sequence = "0101010101"
@@ -187,6 +212,15 @@ def test_consecutive_bits_test_edge_cases():
     assert isinstance(p_value, float)
 
 
+def test_consecutive_bits_test_near_balanced():
+    """Тест для почти сбалансированной последовательности."""
+    sequence = "1111100000"  # 5 единиц, 5 нулей, но не чередующиеся
+    p_value = consecutive_bits_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
 # Параметризованные тесты для longest_sequence_test
 @pytest.mark.parametrize("sequence,block_size,expected_range", [
     # Короткая последовательность с маленькими блоками
@@ -196,10 +230,15 @@ def test_consecutive_bits_test_edge_cases():
     ("1111111100000000", 8, (0, 1)),  # 2 блока по 8 бит
     ("1" * 16, 8, (0, 1)),  # все единицы
     ("0" * 16, 8, (0, 1)),  # все нули
+    # Крайние случаи
+    ("1" * 8, 8, (0, 1)),  # ровно один блок из единиц
+    ("0" * 8, 8, (0, 1)),  # ровно один блок из нулей
 ])
 def test_longest_sequence_test_parametrized(sequence, block_size, expected_range):
     """Параметризованный тест для longest_sequence_test."""
-    p_value = longest_sequence_test(sequence, block_size)
+    # Патчим print в longest_sequence_test, чтобы не загрязнять вывод
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size)
 
     assert isinstance(p_value, float)
     assert expected_range[0] <= p_value <= expected_range[1]
@@ -208,7 +247,8 @@ def test_longest_sequence_test_parametrized(sequence, block_size, expected_range
 def test_longest_sequence_test_basic():
     """Базовый тест для longest_sequence_test."""
     sequence = "1100110011001100"  # 16 бит
-    p_value = longest_sequence_test(sequence, block_size=8)
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=8)
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
@@ -217,7 +257,8 @@ def test_longest_sequence_test_basic():
 def test_longest_sequence_test_single_block():
     """Тест для одного блока."""
     sequence = "11110000"  # 8 бит - ровно один блок
-    p_value = longest_sequence_test(sequence, block_size=8)
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=8)
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
@@ -226,7 +267,8 @@ def test_longest_sequence_test_single_block():
 def test_longest_sequence_test_multiple_blocks():
     """Тест для нескольких блоков."""
     sequence = "11111111000000001111111100000000"  # 32 бита = 4 блока по 8
-    p_value = longest_sequence_test(sequence, block_size=8)
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=8)
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
@@ -235,7 +277,8 @@ def test_longest_sequence_test_multiple_blocks():
 def test_longest_sequence_test_long_runs():
     """Тест с длинными последовательностями единиц."""
     sequence = "111111110000111111110000"  # 24 бита
-    p_value = longest_sequence_test(sequence, block_size=8)
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=8)
 
     assert isinstance(p_value, float)
     assert 0 <= p_value <= 1
@@ -246,7 +289,8 @@ def test_longest_sequence_test_different_block_sizes():
     sequence = "1" * 32  # 32 единицы
 
     for block_size in [4, 8, 16]:
-        p_value = longest_sequence_test(sequence, block_size)
+        with patch('builtins.print'):
+            p_value = longest_sequence_test(sequence, block_size)
 
         assert isinstance(p_value, float)
         assert 0 <= p_value <= 1
@@ -255,11 +299,22 @@ def test_longest_sequence_test_different_block_sizes():
 def test_longest_sequence_test_empty_sequence():
     """Тест с пустой последовательностью."""
     sequence = ""
-    p_value = longest_sequence_test(sequence, block_size=8)
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=8)
 
     # Функция должна вернуть число (возможно, NaN или Inf при делении на ноль)
     # Проверяем, что это float
     assert isinstance(p_value, float)
+
+
+def test_longest_sequence_test_very_long_sequence():
+    """Тест с очень длинной последовательностью."""
+    sequence = "01" * 1000  # 2000 бит
+    with patch('builtins.print'):
+        p_value = longest_sequence_test(sequence, block_size=100)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
 
 
 # Тесты для функции main с использованием моков
@@ -279,7 +334,8 @@ def test_main_normal_execution(mock_write_file, mock_longest_sequence_test,
     mock_longest_sequence_test.side_effect = [0.345, 0.678]
 
     # Вызываем main
-    main()
+    with patch('builtins.print'):
+        main()
 
     # Проверяем вызовы read_file
     assert mock_read_file.call_count == 2
@@ -402,8 +458,137 @@ def test_main_direct_call():
         mock_read_file.side_effect = ["0101010101", "111000111000"]
 
         # Вызываем main
-        main()
+        with patch('builtins.print'):
+            main()
 
         # Проверяем вызовы
         assert mock_read_file.call_count == 2
         assert mock_write_file.call_count == 2
+
+
+# Интеграционные тесты с реальными файлами
+def test_integration_with_real_files():
+    """Интеграционный тест с созданием реальных файлов."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Создаем тестовые файлы
+        cpp_seq_path = os.path.join(tmpdir, "cpp_seq.txt")
+        java_seq_path = os.path.join(tmpdir, "java_seq.txt")
+        cpp_res_path = os.path.join(tmpdir, "cpp_res.txt")
+        java_res_path = os.path.join(tmpdir, "java_res.txt")
+
+        # Записываем тестовые последовательности
+        with open(cpp_seq_path, 'w', encoding='utf-8') as f:
+            f.write("0101010101")
+
+        with open(java_seq_path, 'w', encoding='utf-8') as f:
+            f.write("111000111000")
+
+        # Патчим константы для использования временных файлов
+        with patch('main.PATH_CPP_SEQ', cpp_seq_path), \
+                patch('main.PATH_JAVA_SEQ', java_seq_path), \
+                patch('main.PATH_CPP_NIST_RES', cpp_res_path), \
+                patch('main.PATH_JAVA_NIST_RES', java_res_path):
+            # Вызываем main
+            with patch('builtins.print'):
+                main()
+
+            # Проверяем, что результаты были записаны
+            assert os.path.exists(cpp_res_path)
+            assert os.path.exists(java_res_path)
+
+            # Проверяем содержимое файлов результатов
+            with open(cpp_res_path, 'r', encoding='utf-8') as f:
+                cpp_content = f.read()
+                assert "Результат частотного теста P-value:" in cpp_content
+
+            with open(java_res_path, 'r', encoding='utf-8') as f:
+                java_content = f.read()
+                assert "Результат теста на одинаковые подряд идущие биты P-value:" in java_content
+
+
+def test_integration_full_pipeline():
+    """Полный интеграционный тест всего пайплайна."""
+    # Создаем тестовую последовательность
+    test_sequence = "0101010101" * 10  # 100 бит
+
+    # Тестируем все функции по отдельности
+    p1 = frequency_test(test_sequence)
+    p2 = consecutive_bits_test(test_sequence)
+
+    with patch('builtins.print'):
+        p3 = longest_sequence_test(test_sequence, block_size=8)
+
+    # Проверяем результаты
+    assert isinstance(p1, float)
+    assert isinstance(p2, float)
+    assert isinstance(p3, float)
+    assert 0 <= p1 <= 1
+    assert 0 <= p2 <= 1
+    assert 0 <= p3 <= 1
+
+
+# Тесты для проверки математических свойств
+def test_frequency_test_symmetry():
+    """Проверка симметрии частотного теста для нулей и единиц."""
+    seq_zeros = "0" * 100
+    seq_ones = "1" * 100
+
+    p_zeros = frequency_test(seq_zeros)
+    p_ones = frequency_test(seq_ones)
+
+    # Для последовательностей из всех нулей и всех единиц
+    # p-value должны быть одинаковыми (симметрия)
+    assert abs(p_zeros - p_ones) < 1e-10
+
+
+def test_consecutive_bits_test_for_random_sequence():
+    """Тест consecutive_bits_test для случайной последовательности."""
+    import random
+    random.seed(42)
+
+    # Генерируем случайную последовательность
+    sequence = ''.join(str(random.randint(0, 1)) for _ in range(100))
+
+    p_value = consecutive_bits_test(sequence)
+
+    assert isinstance(p_value, float)
+    assert 0 <= p_value <= 1
+
+
+# Тест для проверки обработки ошибок в read_file
+def test_read_file_nonexistent():
+    """Тест чтения несуществующего файла."""
+    with pytest.raises(FileNotFoundError):
+        read_file("non_existent_file_12345.txt")
+
+
+# Тест для проверки констант
+def test_constants_import():
+    """Тест импорта констант."""
+    # Создаем временный файл constants.py для тестирования
+    constants_content = """
+PI = [0.2148, 0.3672, 0.2305, 0.1875]
+PATH_CPP_SEQ = 'cpp_seq.txt'
+PATH_JAVA_SEQ = 'java_seq.txt'
+PATH_CPP_NIST_RES = 'cpp_res.txt'
+PATH_JAVA_NIST_RES = 'java_res.txt'
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+        tmp.write(constants_content)
+        tmp_path = tmp.name
+
+    try:
+        # Динамически импортируем константы
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("test_constants", tmp_path)
+        test_constants = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(test_constants)
+
+        # Проверяем константы
+        assert len(test_constants.PI) == 4
+        assert isinstance(test_constants.PI[0], float)
+        assert test_constants.PATH_CPP_SEQ == 'cpp_seq.txt'
+
+    finally:
+        os.unlink(tmp_path)
