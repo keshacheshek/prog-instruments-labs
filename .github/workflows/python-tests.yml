@@ -24,4 +24,5 @@ jobs:
 
     - name: Run tests
       run: |
+        cd lab_6
         pytest tests.py -v
