@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "detailed": {
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "simple": {
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+      "datefmt": "%H:%M:%S"
+    },
+    "json": {
+      "()": "__main__.EnhancedJSONFormatter",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "colored": {
+      "()": "__main__.ColoredConsoleFormatter",
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+      "datefmt": "%H:%M:%S"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "level": "INFO",
+      "formatter": "colored",
+      "stream": "ext://sys.stdout"
+    },
+    "file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "DEBUG",
+      "formatter": "detailed",
+      "filename": "logs\\text_processing.log",
+      "maxBytes": 10485760,
+      "backupCount": 10,
+      "encoding": "utf-8"
+    },
+    "error_file": {
+      "class": "logging.FileHandler",
+      "level": "WARNING",
+      "formatter": "detailed",
+      "filename": "logs\\errors.log",
+      "encoding": "utf-8"
+    },
+    "json_file": {
+      "class": "logging.FileHandler",
+      "level": "INFO",
+      "formatter": "json",
+      "filename": "logs\\metrics.json.log",
+      "encoding": "utf-8"
+    },
+    "buffer_handler": {
+      "()": "__main__.LogBufferHandler",
+      "level": "INFO",
+      "capacity": 5000,
+      "flush_interval": 30
+    }
+  },
+  "loggers": {
+    "text_processing": {
+      "level": "DEBUG",
+      "handlers": [
+        "console",
+        "file",
+        "error_file",
+        "json_file",
+        "buffer_handler"
+      ],
+      "propagate": false
+    },
+    "text_processing.models": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file"
+      ],
+      "propagate": false
+    },
+    "text_processing.ir": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file"
+      ],
+      "propagate": false
+    },
+    "text_processing.decoders": {
+      "level": "INFO",
+      "handlers": [
+        "console",
+        "file"
+      ],
+      "propagate": false
+    },
+    "text_processing.metrics": {
+      "level": "INFO",
+      "handlers": [
+        "json_file"
+      ],
+      "propagate": false
+    }
+  },
+  "root": {
+    "level": "WARNING",
+    "handlers": [
+      "console"
+    ]
+  }
+}

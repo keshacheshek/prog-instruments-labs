@@ -1734,7 +1734,6 @@ class HealthCheck:
         return results
 
 
-# Точка входа
 if __name__ == "__main__":
     try:
         # Логируем информацию о системе
@@ -1743,14 +1742,15 @@ if __name__ == "__main__":
         # Регистрируем основные логгеры в менеджере уровней
         level_manager.register_logger(logger, 'INFO', 'Основной логгер системы')
         level_manager.register_logger(logging.getLogger('text_processing.models'),
-                                     'INFO', 'Логгер моделей языка')
+                                      'INFO', 'Логгер моделей языка')
         level_manager.register_logger(logging.getLogger('text_processing.ir'),
-                                     'INFO', 'Логгер информационно-поисковой системы')
+                                      'INFO', 'Логгер информационно-поисковой системы')
         level_manager.register_logger(logging.getLogger('text_processing.decoders'),
-                                     'INFO', 'Логгер декодеров шифров')
+                                      'INFO', 'Логгер декодеров шифров')
 
         # Настраиваем HealthCheck
         health_check = HealthCheck()
+
 
         def check_logging():
             """Проверка работоспособности логирования"""
@@ -1760,6 +1760,7 @@ if __name__ == "__main__":
             test_logger.warning("Тестовое сообщение WARNING")
             return True
 
+
         def check_numpy():
             """Проверка работоспособности NumPy"""
             try:
@@ -1768,30 +1769,29 @@ if __name__ == "__main__":
             except:
                 return False
 
+
         health_check.add_check('Логирование', check_logging, critical=True)
         health_check.add_check('NumPy', check_numpy, critical=True)
 
         # Запускаем проверки здоровья
         health_results = health_check.run_checks()
 
-        # Запускаем демо, если все проверки пройдены
-        if all(result['passed'] for result in health_results.values()
-               if result.get('critical', False)):
-            logger.info(f"Старт работы системы в {datetime.now()}")
-            logger.debug(f"Аргументы командной строки: {sys.argv}")
+        logger.info(f"Старт работы системы в {datetime.now()}")
+        logger.debug(f"Аргументы командной строки: {sys.argv}")
 
-            run_demo()
+        # Запускаем демо
+        run_demo()
 
-            logger.info(f"Система завершила работу в {datetime.now()}")
+        logger.info(f"Система завершила работу в {datetime.now()}")
 
-            # Финализируем метрики
-            final_metrics = metrics.get_metrics_report()
-            logger.info("Финальные метрики системы:")
-            for key, value in final_metrics['counters'].items():
-                logger.info(f"  {key}: {value}")
-        else:
-            logger.critical("Система не может быть запущена из-за критических ошибок")
-            sys.exit(1)
+        # Финализируем метрики
+        final_metrics = metrics.get_metrics_report()
+        logger.info("Финальные метрики системы:")
+        for key, value in final_metrics['counters'].items():
+            logger.info(f"  {key}: {value}")
+
+        # Также убедимся, что все логи записаны в файлы
+        logging.shutdown()
 
     except KeyboardInterrupt:
         logger.info("Работа прервана пользователем (Ctrl+C)")

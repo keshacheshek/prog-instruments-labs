@@ -1,0 +1,16 @@
+2025-12-25 00:25:42 - text_processing.context.ShiftDecoder.__init__ - ERROR - lab5.py:461 - Исключение в контексте 'ShiftDecoder.__init__': object of type 'CountingProbDist' has no len()
+Traceback (most recent call last):
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 459, in log_context
+    yield context_logger
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1315, in __init__
+    logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
+                                                                ~~~^^^^^^^^^
+TypeError: object of type 'CountingProbDist' has no len()
+2025-12-25 00:25:42 - text_processing - ERROR - lab5.py:1619 - Ошибка при тестировании декодеров: object of type 'CountingProbDist' has no len()
+Traceback (most recent call last):
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1606, in test_decoders
+    shift_decoder = ShiftDecoder(training_text)
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1315, in __init__
+    logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
+                                                                ~~~^^^^^^^^^
+TypeError: object of type 'CountingProbDist' has no len()

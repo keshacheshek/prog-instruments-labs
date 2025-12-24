@@ -1,0 +1,96 @@
+{
+  "metrics": {
+    "models.unigram.observations": {
+      "sum": 4.0,
+      "count": 1.0,
+      "min": 4,
+      "max": 4,
+      "avg": 4.0
+    },
+    "context.UnigramWordModel.__init__.duration": {
+      "sum": 0.00033092498779296875,
+      "count": 1.0,
+      "min": 0.00033092498779296875,
+      "max": 0.00033092498779296875,
+      "avg": 0.00033092498779296875
+    },
+    "operation.UnigramWordModel.samples.duration": {
+      "sum": 0.0004813671112060547,
+      "count": 1.0,
+      "min": 0.0004813671112060547,
+      "max": 0.0004813671112060547,
+      "avg": 0.0004813671112060547
+    },
+    "operation.words.duration": {
+      "sum": 8.940696716308594e-05,
+      "count": 1.0,
+      "min": 8.940696716308594e-05,
+      "max": 8.940696716308594e-05,
+      "avg": 8.940696716308594e-05
+    },
+    "operation.canonicalize.duration": {
+      "sum": 0.0002090930938720703,
+      "count": 1.0,
+      "min": 0.0002090930938720703,
+      "max": 0.0002090930938720703,
+      "avg": 0.0002090930938720703
+    },
+    "operation.bigrams.duration": {
+      "sum": 0.00012183189392089844,
+      "count": 1.0,
+      "min": 0.00012183189392089844,
+      "max": 0.00012183189392089844,
+      "avg": 0.00012183189392089844
+    },
+    "context.ShiftDecoder.__init__.duration": {
+      "sum": 0.002839803695678711,
+      "count": 1.0,
+      "min": 0.002839803695678711,
+      "max": 0.002839803695678711,
+      "avg": 0.002839803695678711
+    },
+    "context.test_decoders_execution.duration": {
+      "sum": 0.0045354366302490234,
+      "count": 1.0,
+      "min": 0.0045354366302490234,
+      "max": 0.0045354366302490234,
+      "avg": 0.0045354366302490234
+    },
+    "operation.test_decoders.duration": {
+      "sum": 0.0053822994232177734,
+      "count": 1.0,
+      "min": 0.0053822994232177734,
+      "max": 0.0053822994232177734,
+      "avg": 0.0053822994232177734
+    },
+    "context.demo_execution.duration": {
+      "sum": 0.009034395217895508,
+      "count": 1.0,
+      "min": 0.009034395217895508,
+      "max": 0.009034395217895508,
+      "avg": 0.009034395217895508
+    },
+    "operation.run_demo.duration": {
+      "sum": 0.00973653793334961,
+      "count": 1.0,
+      "min": 0.00973653793334961,
+      "max": 0.00973653793334961,
+      "avg": 0.00973653793334961
+    }
+  },
+  "counters": {
+    "models.unigram.created": 1,
+    "models.unigram.samples_generated": 3,
+    "operation.UnigramWordModel.samples.calls": 1,
+    "utils.words.extracted": 15,
+    "operation.words.calls": 1,
+    "utils.canonicalize.calls": 1,
+    "operation.canonicalize.calls": 1,
+    "utils.bigrams.created": 69,
+    "operation.bigrams.calls": 1,
+    "context.ShiftDecoder.__init__.exceptions": 1,
+    "operation.test_decoders.calls": 1,
+    "operation.run_demo.calls": 1
+  },
+  "timestamp": "2025-12-25T00:25:42.267933"
+}

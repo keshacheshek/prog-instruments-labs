@@ -1,0 +1,108 @@
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:368 - Продвинутая система логирования инициализирована. Логи в директории: logs
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1654 - ============================================================
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1655 - ИНФОРМАЦИЯ О СИСТЕМЕ
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1656 - ============================================================
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1659 - Python версия: 3.13.2 (tags/v3.13.2:4f8bb39, Feb  4 2025, 15:23:48) [MSC v.1942 64 bit (AMD64)]
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1660 - Python исполняемый файл: C:\Users\Кешок\AppData\Local\Programs\Python\Python313\python.exe
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1663 - Платформа: win32
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1666 - Рабочая директория: C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1669 - NumPy версия: 2.2.6
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1672 - Конфигурация логирования:
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1674 -   Обработчик: StreamHandler, уровень: INFO
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1674 -   Обработчик: RotatingFileHandler, уровень: DEBUG
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1674 -   Обработчик: FileHandler, уровень: WARNING
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1674 -   Обработчик: FileHandler, уровень: INFO
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1674 -   Обработчик: LogBufferHandler, уровень: INFO
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1676 - ============================================================
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1697 - Запуск проверок здоровья системы
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1711 - Проверка 'Логирование': ПРОЙДЕНА
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1711 - Проверка 'NumPy': ПРОЙДЕНА
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1730 - Все проверки здоровья пройдены успешно
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1779 - Старт работы системы в 2025-12-25 00:25:42.255158
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1780 - Аргументы командной строки: ['lab5.py']
+2025-12-25 00:25:42 - text_processing.__main__.run_demo - INFO - lab5.py:412 - Начало операции 'run_demo'
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1625 - Запуск демонстрации модуля text.py
+2025-12-25 00:25:42 - text_processing.context.demo_execution - INFO - lab5.py:456 - Вход в контекст: demo_execution
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1630 - Создание тестовой UnigramWordModel...
+2025-12-25 00:25:42 - text_processing.context.UnigramWordModel.__init__ - INFO - lab5.py:456 - Вход в контекст: UnigramWordModel.__init__
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:529 - Создание UnigramWordModel с 4 наблюдениями
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:530 - Параметр default: 0
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:537 - UnigramWordModel создан успешно. Уникальных слов: unknown
+2025-12-25 00:25:42 - text_processing.context.UnigramWordModel.__init__ - INFO - lab5.py:473 - Выход из контекста: UnigramWordModel.__init__ (заняло 0.0003 секунд)
+2025-12-25 00:25:42 - text_processing.__main__.samples - INFO - lab5.py:409 - Начало операции 'UnigramWordModel.samples' с аргументами: <__main__.UnigramWordModel object at 0x000001B27F94DFD0>, 3
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:559 - Сгенерировано 3 слов. Первые 5: ['hello', 'test', 'test']
+2025-12-25 00:25:42 - text_processing.__main__.samples - INFO - lab5.py:420 - Операция 'UnigramWordModel.samples' завершена. Результат: hello test test
+2025-12-25 00:25:42 - text_processing.__main__.samples - DEBUG - lab5.py:428 - Операция 'UnigramWordModel.samples' заняла 0.0005 секунд
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1632 - Тестовая модель создана. Пример генерации: hello test test
+2025-12-25 00:25:42 - text_processing.__main__.test_decoders - INFO - lab5.py:412 - Начало операции 'test_decoders'
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1594 - Начало тестирования декодеров
+2025-12-25 00:25:42 - text_processing.context.test_decoders_execution - INFO - lab5.py:456 - Вход в контекст: test_decoders_execution
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1605 - Тестирование ShiftDecoder...
+2025-12-25 00:25:42 - text_processing.context.ShiftDecoder.__init__ - INFO - lab5.py:456 - Вход в контекст: ShiftDecoder.__init__
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1308 - Создание ShiftDecoder
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1309 - Длина тренировочного текста: 72 символов
+2025-12-25 00:25:42 - text_processing.__main__.canonicalize - DEBUG - lab5.py:409 - Начало операции 'canonicalize' с аргументами: the quick brown fox jumps over the lazy dog. hello world this is a test.
+2025-12-25 00:25:42 - text_processing.__main__.words - DEBUG - lab5.py:409 - Начало операции 'words' с аргументами: the quick brown fox jumps over the lazy dog. hello world this is a test.
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1183 - Извлечено 15 слов из текста (первые 5: ['the', 'quick', 'brown', 'fox', 'jumps'])
+2025-12-25 00:25:42 - text_processing.__main__.words - DEBUG - lab5.py:420 - Операция 'words' завершена. Результат: ['the', 'quick', 'brown', 'fox', 'jumps', 'over', 'the', 'lazy', 'dog', 'hello', 'world', 'this', 'i...
+2025-12-25 00:25:42 - text_processing.__main__.words - DEBUG - lab5.py:428 - Операция 'words' заняла 0.0001 секунд
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1199 - Канонизированный текст (первые 50 символов): 'the quick brown fox jumps over the lazy dog hello ...'
+2025-12-25 00:25:42 - text_processing.__main__.canonicalize - DEBUG - lab5.py:420 - Операция 'canonicalize' завершена. Результат: the quick brown fox jumps over the lazy dog hello world this is a test
+2025-12-25 00:25:42 - text_processing.__main__.canonicalize - DEBUG - lab5.py:428 - Операция 'canonicalize' заняла 0.0002 секунд
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1312 - Длина канонизированного текста: 70 символов
+2025-12-25 00:25:42 - text_processing.__main__.bigrams - DEBUG - lab5.py:409 - Начало операции 'bigrams' с аргументами: the quick brown fox jumps over the lazy dog hello world this is a test
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1291 - Создание биграмм из текста длиной 70
+2025-12-25 00:25:42 - text_processing - DEBUG - lab5.py:1293 - Создано 69 биграмм. Первые 5: ['th', 'he', 'e ', ' q', 'qu']
+2025-12-25 00:25:42 - text_processing.__main__.bigrams - DEBUG - lab5.py:420 - Операция 'bigrams' завершена. Результат: ['th', 'he', 'e ', ' q', 'qu', 'ui', 'ic', 'ck', 'k ', ' b', 'br', 'ro', 'ow', 'wn', 'n ', ' f', 'fo...
+2025-12-25 00:25:42 - text_processing.__main__.bigrams - DEBUG - lab5.py:428 - Операция 'bigrams' заняла 0.0001 секунд
+2025-12-25 00:25:42 - text_processing.context.ShiftDecoder.__init__ - ERROR - lab5.py:461 - Исключение в контексте 'ShiftDecoder.__init__': object of type 'CountingProbDist' has no len()
+Traceback (most recent call last):
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 459, in log_context
+    yield context_logger
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1315, in __init__
+    logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
+                                                                ~~~^^^^^^^^^
+TypeError: object of type 'CountingProbDist' has no len()
+2025-12-25 00:25:42 - text_processing.context.ShiftDecoder.__init__ - INFO - lab5.py:473 - Выход из контекста: ShiftDecoder.__init__ (заняло 0.0028 секунд)
+2025-12-25 00:25:42 - text_processing - ERROR - lab5.py:1619 - Ошибка при тестировании декодеров: object of type 'CountingProbDist' has no len()
+Traceback (most recent call last):
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1606, in test_decoders
+    shift_decoder = ShiftDecoder(training_text)
+  File "C:\Users\Кешок\Desktop\TMP\prog-instruments-labs\lab_5\lab5.py", line 1315, in __init__
+    logger.debug(f"ShiftDecoder создан. Размер модели биграмм: {len(self.P2)}")
+                                                                ~~~^^^^^^^^^
+TypeError: object of type 'CountingProbDist' has no len()
+2025-12-25 00:25:42 - text_processing.context.test_decoders_execution - INFO - lab5.py:473 - Выход из контекста: test_decoders_execution (заняло 0.0045 секунд)
+2025-12-25 00:25:42 - text_processing.__main__.test_decoders - INFO - lab5.py:423 - Операция 'test_decoders' завершена
+2025-12-25 00:25:42 - text_processing.__main__.test_decoders - DEBUG - lab5.py:428 - Операция 'test_decoders' заняла 0.0054 секунд
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1637 - Все тесты завершены успешно
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1641 - Метрики работы системы:
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   models.unigram.created: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   models.unigram.samples_generated: 3
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   operation.UnigramWordModel.samples.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   utils.words.extracted: 15
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   operation.words.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   utils.canonicalize.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   operation.canonicalize.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   utils.bigrams.created: 69
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   operation.bigrams.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   context.ShiftDecoder.__init__.exceptions: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1643 -   operation.test_decoders.calls: 1
+2025-12-25 00:25:42 - text_processing.context.demo_execution - INFO - lab5.py:473 - Выход из контекста: demo_execution (заняло 0.0090 секунд)
+2025-12-25 00:25:42 - text_processing.__main__.run_demo - INFO - lab5.py:423 - Операция 'run_demo' завершена
+2025-12-25 00:25:42 - text_processing.__main__.run_demo - DEBUG - lab5.py:428 - Операция 'run_demo' заняла 0.0097 секунд
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1785 - Система завершила работу в 2025-12-25 00:25:42.265234
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1789 - Финальные метрики системы:
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   models.unigram.created: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   models.unigram.samples_generated: 3
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.UnigramWordModel.samples.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   utils.words.extracted: 15
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.words.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   utils.canonicalize.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.canonicalize.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   utils.bigrams.created: 69
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.bigrams.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   context.ShiftDecoder.__init__.exceptions: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.test_decoders.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1791 -   operation.run_demo.calls: 1
+2025-12-25 00:25:42 - text_processing - INFO - lab5.py:1808 - Финальные метрики сохранены в logs\final_metrics.json
